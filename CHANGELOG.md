@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-10-18
+
+### Corrigé
+- Installeurs macOS : signature ad hoc quand aucun certificat Apple n'est configuré
+  (la 0.1.0 n'avait pas pu être construite pour macOS).
+
 ## [0.1.0] - 2026-10-18
 
 ### Ajouté
