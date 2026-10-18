@@ -1,0 +1,641 @@
+//! Builds the bash script that performs an operation. The same script runs
+//! locally (`bash -s`) and on a server (`ssh … bash -s`): it is sent on stdin,
+//! so secrets never appear in a command line.
+//!
+//! Output protocol, parsed by `ops.rs`:
+//!   `::ml::step::<label>`   a new step starts
+//!   `::ml::warn::<text>`    a non-blocking warning
+//!   `::ml::error::<text>`   a readable failure reason
+//!   `::ml::result::k=v`     a value reported back (version, commit…)
+
+use std::collections::BTreeMap;
+
+use base64::Engine;
+
+use crate::catalog::{AppDef, DotenvQuote, Step, TargetDef, VersionSource};
+
+const PRELUDE: &str = r#"set -Eeuo pipefail
+umask 022
+export GIT_TERMINAL_PROMPT=0 DOCKER_CLI_HINTS=false
+ML_STEP=""
+ml_step() { ML_STEP="$*"; printf '::ml::step::%s\n' "$*"; }
+ml_info() { printf '%s\n' "$*"; }
+ml_warn() { printf '::ml::warn::%s\n' "$*"; }
+ml_fail() { printf '::ml::error::%s\n' "$*" >&2; exit 1; }
+trap 'rc=$?; printf "::ml::error::Échec pendant « %s » (code %s).\n" "$ML_STEP" "$rc" >&2' ERR
+ml_b64d() { printf '%s' "$1" | base64 -d 2>/dev/null || printf '%s' "$1" | base64 -D; }
+ml_rand_hex() { openssl rand -hex "$1" 2>/dev/null || od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'; }
+ml_rand_b64() { { openssl rand -base64 "$1" 2>/dev/null || head -c "$1" /dev/urandom | base64; } | tr -d '\n'; }
+ml_compose() { docker compose "$@"; }
+ml_require() { command -v "$1" >/dev/null 2>&1 || ml_fail "$2"; }
+ml_check_prereqs() {
+  ml_require git "Git est introuvable sur la machine cible. Installez-le puis réessayez."
+  ml_require docker "Docker est introuvable. Installez Docker Desktop (poste) ou Docker Engine (serveur)."
+  docker compose version >/dev/null 2>&1 || ml_fail "Docker Compose v2 est introuvable (commande « docker compose »)."
+  docker info >/dev/null 2>&1 || ml_fail "Docker ne répond pas. Démarrez Docker Desktop (ou le service docker), puis réessayez."
+}
+# Sets KEY=VALUE in a dotenv file, in place, keeping the other lines.
+ml_dotenv() {
+  local key="$1" val="$2" file="${3:-.env}" line out found=0 re
+  case "$val" in *$'\n'*) ml_fail "Valeur sur plusieurs lignes refusée pour $key.";; esac
+  case "$ML_DOTENV_QUOTE" in
+    single)
+      case "$val" in *"'"*) ml_fail "Apostrophe refusée dans la valeur de $key.";; esac
+      out="$key='$val'";;
+    *) out="$key=$val";;
+  esac
+  [ -f "$file" ] || { : > "$file"; chmod 600 "$file" 2>/dev/null || true; }
+  re="^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*="
+  {
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [[ $line =~ $re ]]; then
+        [ "$found" = 1 ] || printf '%s\n' "$out"
+        found=1
+      else
+        printf '%s\n' "$line"
+      fi
+    done < "$file"
+    [ "$found" = 1 ] || printf '%s\n' "$out"
+  } > "$file.ml-tmp"
+  cat "$file.ml-tmp" > "$file"
+  rm -f "$file.ml-tmp"
+}
+ml_dotenv_get() {
+  local file="${2:-.env}"
+  [ -f "$file" ] || return 0
+  sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=[[:space:]]*//p" "$file" | tail -n 1 | sed -E "s/^'(.*)'\$/\\1/; s/^\"(.*)\"\$/\\1/"
+}
+# Sets a value only when it is missing or a placeholder: generated secrets are never replaced.
+ml_dotenv_default() {
+  local cur
+  cur="$(ml_dotenv_get "$1" "${3:-.env}")"
+  case "$cur" in
+    ""|CHANGE_ME|CHANGEME|changeme|change-me*) ml_dotenv "$1" "$2" "${3:-.env}";;
+  esac
+}
+ml_wait() {
+  local timeout="$1" start=$SECONDS; shift
+  until "$@" >/dev/null 2>&1; do
+    [ $((SECONDS - start)) -lt "$timeout" ] || return 1
+    sleep 3
+  done
+}
+ml_http_ok() {
+  if command -v curl >/dev/null 2>&1; then curl -fsSk -o /dev/null --max-time 5 "$1"
+  else wget -q -O /dev/null --no-check-certificate -T 5 "$1"; fi
+}
+ml_container_http() {
+  ml_compose exec -T "$1" sh -c 'curl -fsS -o /dev/null --max-time 5 "$0" 2>/dev/null || wget -q -O /dev/null -T 5 "$0"' "$2"
+}
+ml_ghcr_login() {
+  [ -n "${ML_GH_TOKEN:-}" ] || return 1
+  printf '%s' "$ML_GH_TOKEN" | docker login ghcr.io -u x-access-token --password-stdin >/dev/null
+}
+ml_pull() {
+  ml_compose pull "$@" && return 0
+  ml_info "Registre d'images refusé : connexion à ghcr.io avec le token GitHub…"
+  ml_ghcr_login || ml_fail "Images inaccessibles. Ajoutez un token GitHub (droit read:packages) dans les réglages du launcher."
+  ml_compose pull "$@"
+}
+ml_sync() {
+  if [ ! -d "$ML_DIR/.git" ]; then
+    if [ -d "$ML_DIR" ] && [ -n "$(ls -A "$ML_DIR" 2>/dev/null)" ]; then
+      ml_fail "Le dossier $ML_DIR existe déjà et ne contient pas l'application. Choisissez un autre dossier ou videz-le."
+    fi
+    mkdir -p "$ML_DIR"
+    ml_info "Clonage de $ML_REPO_URL…"
+    git -c core.autocrlf=false clone --no-checkout "$ML_REPO_URL" "$ML_DIR" \
+      || ml_fail "Téléchargement impossible. Dépôt privé ? Ajoutez un token GitHub dans les réglages du launcher."
+  fi
+  cd "$ML_DIR"
+  git config core.autocrlf false
+  if [ "$ML_REF_KIND" = tag ]; then
+    git fetch --force --tags origin
+    git -c advice.detachedHead=false checkout --force "refs/tags/$ML_REF"
+  else
+    git fetch origin "+refs/heads/$ML_REF:refs/remotes/origin/$ML_REF"
+    git checkout --force -B "$ML_REF" "refs/remotes/origin/$ML_REF"
+  fi
+  ml_info "Code à jour : $(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
+}
+"#;
+
+/// What the script must do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Install,
+    Update,
+    Start,
+    Stop,
+    Restart,
+    Remove,
+}
+
+/// Where the code lives and which version to fetch.
+pub struct Plan<'a> {
+    pub app: &'a AppDef,
+    pub target: &'a TargetDef,
+    pub action: Action,
+    /// Install directory; may start with `~/` (expanded on the target).
+    pub dir: &'a str,
+    /// Form values (secrets included for install), keyed by field key.
+    pub values: &'a BTreeMap<String, String>,
+    /// `("tag", "v1.2.0")` or `("branch", "main")`.
+    pub git_ref: (&'a str, &'a str),
+    pub token: Option<&'a str>,
+    /// Running under Git Bash on Windows.
+    pub windows: bool,
+}
+
+pub fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// `~/x` → `"$HOME"/'x'`, otherwise single-quoted.
+fn shell_path(p: &str) -> String {
+    if p == "~" {
+        "\"$HOME\"".into()
+    } else if let Some(rest) = p.strip_prefix("~/") {
+        format!("\"$HOME\"/{}", sh_quote(rest))
+    } else {
+        sh_quote(p)
+    }
+}
+
+fn b64(s: &str) -> String {
+    base64::engine::general_purpose::STANDARD.encode(s)
+}
+
+pub fn build(plan: &Plan) -> String {
+    let mut s = String::with_capacity(16 * 1024);
+    // The whole script is one compound command: bash reads it entirely before
+    // running it, so commands inside can never swallow the rest of stdin.
+    s.push_str("{\n");
+    s.push_str(PRELUDE);
+    s.push_str(&context_block(plan));
+    s.push_str(&body(plan));
+    s.push_str("ml_report\n");
+    s.push_str("} < /dev/null\n");
+    s
+}
+
+fn context_block(plan: &Plan) -> String {
+    let mut s = String::new();
+    let app = plan.app;
+    let workdir = plan.target.workdir.as_deref().unwrap_or("");
+    s.push_str(&format!("ML_DIR={}\n", shell_path(plan.dir)));
+    if workdir.is_empty() {
+        s.push_str("ML_WORK=\"$ML_DIR\"\n");
+    } else {
+        s.push_str(&format!("ML_WORK=\"$ML_DIR\"/{}\n", sh_quote(workdir)));
+    }
+    s.push_str(&format!("ML_APP={}\n", sh_quote(&app.id)));
+    s.push_str(&format!(
+        "ML_REPO_URL={}\n",
+        sh_quote(&app.repo.clone_url())
+    ));
+    s.push_str(&format!("ML_REF_KIND={}\n", sh_quote(plan.git_ref.0)));
+    s.push_str(&format!("ML_REF={}\n", sh_quote(plan.git_ref.1)));
+    let quote = match app.dotenv_quote {
+        DotenvQuote::Single => "single",
+        DotenvQuote::None => "none",
+    };
+    s.push_str(&format!("ML_DOTENV_QUOTE={quote}\n"));
+    if plan.windows {
+        // Compose files are listed with ':' in the apps' .env files.
+        s.push_str("export COMPOSE_PATH_SEPARATOR=:\nexport MSYS_NO_PATHCONV=1\n");
+    }
+    match plan.token {
+        Some(t) if !t.is_empty() => {
+            let header = format!(
+                "AUTHORIZATION: basic {}",
+                b64(&format!("x-access-token:{t}"))
+            );
+            s.push_str(&format!(
+                "ML_GH_TOKEN=\"$(ml_b64d {})\"\n",
+                sh_quote(&b64(t))
+            ));
+            s.push_str(
+                "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader\n",
+            );
+            s.push_str(&format!(
+                "export GIT_CONFIG_VALUE_0=\"$(ml_b64d {})\"\n",
+                sh_quote(&b64(&header))
+            ));
+        }
+        _ => s.push_str("ML_GH_TOKEN=\"\"\n"),
+    }
+    // Every field of the target is defined (empty when not given), so steps
+    // can use them under `set -u`. They are shell variables, not exported:
+    // a step exports what its own tools need.
+    for f in &plan.target.fields {
+        let v = plan
+            .values
+            .get(&f.key)
+            .cloned()
+            .or_else(|| f.default.clone())
+            .unwrap_or_default();
+        s.push_str(&format!(
+            "{}=\"$(ml_b64d {})\"\n",
+            f.key,
+            sh_quote(&b64(&v))
+        ));
+    }
+    s.push_str(&report_fn(app));
+    s
+}
+
+fn report_fn(app: &AppDef) -> String {
+    let detect = match app.version.source {
+        VersionSource::File => {
+            let path = app.version.path.as_deref().unwrap_or("VERSION");
+            match &app.version.json_key {
+                Some(k) => format!(
+                    "sed -n -E 's/.*\"{k}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\\1/p' {} | head -n 1",
+                    sh_quote(path)
+                ),
+                None => format!("tr -d '[:space:]' < {}", sh_quote(path)),
+            }
+        }
+        VersionSource::Tags | VersionSource::Releases => {
+            "git describe --tags --exact-match 2>/dev/null || git describe --tags --always".into()
+        }
+        VersionSource::Commit => "git rev-parse --short=7 HEAD".into(),
+    };
+    format!(
+        "ml_report() {{\n  cd \"$ML_DIR\" 2>/dev/null || return 0\n  [ -d .git ] || return 0\n  printf '::ml::result::commit=%s\\n' \"$(git rev-parse HEAD 2>/dev/null || true)\"\n  printf '::ml::result::version=%s\\n' \"$({detect} 2>/dev/null || true)\"\n}}\n"
+    )
+}
+
+fn default_steps(action: Action) -> Vec<Step> {
+    let step = |label: &str, run: &str| Step {
+        label: label.into(),
+        run: run.into(),
+    };
+    match action {
+        Action::Start => vec![step("Démarrage", "ml_compose up -d")],
+        Action::Stop => vec![step("Arrêt", "ml_compose stop")],
+        Action::Remove => vec![step(
+            "Arrêt et suppression des conteneurs (les données sont conservées)",
+            "ml_compose down --remove-orphans",
+        )],
+        _ => vec![],
+    }
+}
+
+fn body(plan: &Plan) -> String {
+    let t = plan.target;
+    let mut steps: Vec<Step> = match plan.action {
+        Action::Install => t.install.clone(),
+        Action::Update => t.update.clone(),
+        Action::Start => non_empty(&t.start).unwrap_or_else(|| default_steps(Action::Start)),
+        Action::Stop => non_empty(&t.stop).unwrap_or_else(|| default_steps(Action::Stop)),
+        Action::Restart => {
+            let mut v = non_empty(&t.stop).unwrap_or_else(|| default_steps(Action::Stop));
+            v.extend(non_empty(&t.start).unwrap_or_else(|| default_steps(Action::Start)));
+            v
+        }
+        Action::Remove => default_steps(Action::Remove),
+    };
+    // Install and update always fetch the code, even if a catalog forgets it.
+    if matches!(plan.action, Action::Install | Action::Update) && !steps.iter().any(Step::is_sync) {
+        steps.insert(
+            0,
+            Step {
+                label: "Récupération du code".into(),
+                run: "@sync".into(),
+            },
+        );
+    }
+
+    let mut s = String::new();
+    s.push_str("ml_step 'Vérification des prérequis'\nml_check_prereqs\n");
+    if !matches!(plan.action, Action::Install) {
+        s.push_str(
+            "[ -d \"$ML_WORK\" ] || ml_fail \"Dossier d'installation introuvable : $ML_WORK\"\n",
+        );
+    }
+    for step in &steps {
+        s.push_str(&format!("ml_step {}\n", sh_quote(&step.label)));
+        if step.is_sync() {
+            s.push_str("ml_sync\n");
+        } else {
+            s.push_str("cd \"$ML_WORK\"\n");
+            s.push_str(step.run.trim_end());
+            s.push('\n');
+        }
+    }
+    s
+}
+
+fn non_empty(v: &[Step]) -> Option<Vec<Step>> {
+    (!v.is_empty()).then(|| v.to_vec())
+}
+
+/// Lists the step labels in order, for the progress display.
+pub fn step_labels(target: &TargetDef, action: Action) -> Vec<String> {
+    let mut labels = vec!["Vérification des prérequis".to_string()];
+    let steps: Vec<Step> = match action {
+        Action::Install => target.install.clone(),
+        Action::Update => target.update.clone(),
+        Action::Start => non_empty(&target.start).unwrap_or_else(|| default_steps(Action::Start)),
+        Action::Stop => non_empty(&target.stop).unwrap_or_else(|| default_steps(Action::Stop)),
+        Action::Restart => {
+            let mut v = non_empty(&target.stop).unwrap_or_else(|| default_steps(Action::Stop));
+            v.extend(non_empty(&target.start).unwrap_or_else(|| default_steps(Action::Start)));
+            v
+        }
+        Action::Remove => default_steps(Action::Remove),
+    };
+    if matches!(action, Action::Install | Action::Update) && !steps.iter().any(Step::is_sync) {
+        labels.push("Récupération du code".into());
+    }
+    labels.extend(steps.into_iter().map(|s| s.label));
+    labels
+}
+
+/// Probes a machine: tools, Docker daemon, OS. Read-only.
+pub const HOST_CHECK: &str = r#"{
+r() { printf '::ml::result::%s=%s\n' "$1" "$2"; }
+r os "$(uname -sm 2>/dev/null || echo inconnu)"
+if command -v git >/dev/null 2>&1; then r git "$(git --version 2>/dev/null)"; else r git ""; fi
+if command -v docker >/dev/null 2>&1; then
+  r docker "$(docker --version 2>/dev/null)"
+  r compose "$(docker compose version --short 2>/dev/null || true)"
+  if docker info >/dev/null 2>&1; then r daemon ok; else r daemon ""; fi
+else
+  r docker ""; r compose ""; r daemon ""
+fi
+} < /dev/null
+"#;
+
+/// Lists the containers of an installation, as JSON lines.
+pub fn status_script(dir: &str, workdir: Option<&str>, windows: bool) -> String {
+    let mut s = String::from("{\n");
+    if windows {
+        s.push_str("export COMPOSE_PATH_SEPARATOR=:\n");
+    }
+    s.push_str(&format!("ML_DIR={}\n", shell_path(dir)));
+    match workdir {
+        Some(w) if !w.is_empty() => {
+            s.push_str(&format!("cd \"$ML_DIR\"/{} || exit 3\n", sh_quote(w)))
+        }
+        _ => s.push_str("cd \"$ML_DIR\" || exit 3\n"),
+    }
+    s.push_str("docker compose ps --all --format json\n} < /dev/null\n");
+    s
+}
+
+/// Last lines of the containers' logs.
+pub fn logs_script(dir: &str, workdir: Option<&str>, windows: bool) -> String {
+    let mut s = status_script(dir, workdir, windows);
+    s = s.replace(
+        "docker compose ps --all --format json",
+        "docker compose logs --no-color --tail 300 --timestamps",
+    );
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::{Catalog, EMBEDDED};
+
+    #[test]
+    fn quotes_shell_strings() {
+        assert_eq!(sh_quote("abc"), "'abc'");
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+        assert_eq!(shell_path("~/myalfred/mia"), "\"$HOME\"/'myalfred/mia'");
+        assert_eq!(shell_path("/opt/x y"), "'/opt/x y'");
+    }
+
+    #[test]
+    fn secrets_are_never_in_clear() {
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mia").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let mut values = BTreeMap::new();
+        values.insert("MIA_ADMIN_PASSWORD".to_string(), "S3cret!pass".to_string());
+        let script = build(&Plan {
+            app,
+            target,
+            action: Action::Install,
+            dir: "~/MyAlfred/mia",
+            values: &values,
+            git_ref: ("branch", "main"),
+            token: Some("ghp_secretToken"),
+            windows: false,
+        });
+        assert!(!script.contains("S3cret!pass"));
+        assert!(!script.contains("ghp_secretToken"));
+        assert!(script.starts_with("{\n"));
+        assert!(script.trim_end().ends_with("} < /dev/null"));
+        assert!(script.contains("ml_sync"));
+        // Defaults are applied to fields left empty.
+        assert!(script.contains(&format!("MIA_PORT=\"$(ml_b64d '{}')\"", b64("8080"))));
+    }
+
+    fn bash() -> &'static str {
+        // macOS ships bash 3.2: the oldest version the scripts must support.
+        if std::path::Path::new("/bin/bash").exists() {
+            "/bin/bash"
+        } else {
+            "bash"
+        }
+    }
+
+    fn run_bash(script: &str, cwd: &std::path::Path) -> std::process::Output {
+        use std::io::Write;
+        let mut child = std::process::Command::new(bash())
+            .arg("-s")
+            .current_dir(cwd)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    #[test]
+    fn every_generated_script_is_valid_bash() {
+        if cfg!(windows) {
+            return;
+        }
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let values = BTreeMap::new();
+        for app in &catalog.apps {
+            for target in [&app.targets.local, &app.targets.server]
+                .into_iter()
+                .flatten()
+            {
+                for action in [
+                    Action::Install,
+                    Action::Update,
+                    Action::Start,
+                    Action::Stop,
+                    Action::Restart,
+                    Action::Remove,
+                ] {
+                    let script = build(&Plan {
+                        app,
+                        target,
+                        action,
+                        dir: "~/MyAlfred/x",
+                        values: &values,
+                        git_ref: ("branch", "main"),
+                        token: Some("tok"),
+                        windows: false,
+                    });
+                    let out = std::process::Command::new(bash())
+                        .args(["-n", "-c", &script])
+                        .output()
+                        .unwrap();
+                    assert!(
+                        out.status.success(),
+                        "{} {:?}: {}",
+                        app.id,
+                        action,
+                        String::from_utf8_lossy(&out.stderr)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dotenv_helpers_edit_in_place() {
+        if cfg!(windows) {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("ml-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(".env"),
+            "# comment\nA=1\nexport B=old\nMONGO_PASS=\nKEEP=x\n",
+        )
+        .unwrap();
+        let script = format!(
+            "{{\n{PRELUDE}\nML_DOTENV_QUOTE=none\nml_dotenv A 2\nml_dotenv B 'new value'\nml_dotenv C 3\n\
+             ml_dotenv_default MONGO_PASS generated\nml_dotenv_default KEEP other\n\
+             printf 'got=%s\\n' \"$(ml_dotenv_get B)\"\nml_dotenv X y sub.env\n\
+             ML_DOTENV_QUOTE=single\nml_dotenv Q 'a b'\n}} < /dev/null\n"
+        );
+        let out = run_bash(&script, &dir);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let env = std::fs::read_to_string(dir.join(".env")).unwrap();
+        assert_eq!(
+            env,
+            "# comment\nA=2\nB=new value\nMONGO_PASS=generated\nKEEP=x\nC=3\nQ='a b'\n"
+        );
+        assert!(String::from_utf8_lossy(&out.stdout).contains("got=new value"));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sub.env")).unwrap(),
+            "X=y\n"
+        );
+        // A failing step reports its label.
+        let out = run_bash(
+            &format!(
+                "{{\n{PRELUDE}\nml_step 'Étape test'\nfalse\necho unreachable\n}} < /dev/null\n"
+            ),
+            &dir,
+        );
+        assert!(!out.status.success());
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("unreachable"));
+        assert!(String::from_utf8_lossy(&out.stderr)
+            .contains("::ml::error::Échec pendant « Étape test »"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn labels_match_steps() {
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mytrix").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let labels = step_labels(target, Action::Update);
+        assert_eq!(labels.len(), 1 + target.update.len());
+        let start = step_labels(target, Action::Start);
+        assert_eq!(start.last().unwrap(), "Démarrage");
+    }
+}
+
+#[cfg(test)]
+mod live {
+    use super::*;
+    use crate::catalog::{Catalog, EMBEDDED};
+
+    /// Clones a private repo with the token passed the way real scripts do,
+    /// then reports the version. Run with `GITHUB_TOKEN=… ML_TEST_DIR=… cargo test -- --ignored live_`.
+    #[test]
+    #[ignore]
+    fn live_sync_private_repo() {
+        let token = std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN");
+        let base = std::env::var("ML_TEST_DIR").expect("ML_TEST_DIR");
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mytrix").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let values = BTreeMap::new();
+        let dir = format!("{base}/mytrix");
+        let plan = Plan {
+            app,
+            target,
+            action: Action::Install,
+            dir: &dir,
+            values: &values,
+            git_ref: ("branch", "main"),
+            token: Some(&token),
+            windows: false,
+        };
+        let script = format!(
+            "{{\n{PRELUDE}{}ml_sync\nml_report\n}} < /dev/null\n",
+            context_block(&plan)
+        );
+        assert!(!script.contains(&token));
+        let out = super::tests_support::run(&script);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        println!("{stdout}\n{}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success());
+        assert!(stdout.contains("::ml::result::commit="));
+        // Run again: the existing clone is updated in place.
+        let out = super::tests_support::run(&script);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // The token must not be persisted in the clone.
+        let cfg = std::fs::read_to_string(format!("{dir}/.git/config")).unwrap();
+        assert!(!cfg.contains(&token) && !cfg.contains("extraheader"));
+    }
+}
+
+#[cfg(test)]
+mod tests_support {
+    pub fn run(script: &str) -> std::process::Output {
+        use std::io::Write;
+        let mut child = std::process::Command::new("/bin/bash")
+            .arg("-s")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+}

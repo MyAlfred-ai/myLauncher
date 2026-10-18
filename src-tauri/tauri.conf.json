@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MyAlfred Launcher",
+  "version": "0.1.0",
+  "identifier": "ai.myalfred.launcher",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MyAlfred Launcher",
+        "width": 1180,
+        "height": 780,
+        "minWidth": 380,
+        "minHeight": 560,
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "Installe et met à jour les applications MyAlfred",
+    "longDescription": "Le launcher MyAlfred installe MIA, myBrief, myTrix et myBrain sur votre poste ou sur un serveur, détecte les nouvelles versions et les applique en un clic.",
+    "copyright": "© MyAlfred",
+    "publisher": "MyAlfred",
+    "homepage": "https://myalfred.ai",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNjczMEU4OUQzODVFMjIKUldRaVhqaWQ2REJuTUNsRWJhSWhaYlBKV0VwSmRHYmx4d1E0Z0V4T2N3cHhVaXJTeERaN21NYU4K",
+      "endpoints": [
+        "https://github.com/MyAlfred-ai/myLauncher/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

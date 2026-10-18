@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+import { appStatus, displayVersion, initialValues, isActive, relativeTime, validateField } from "./format";
+import type { FieldDef, Installation } from "./types";
+
+describe("displayVersion", () => {
+  it("prefixes numeric versions and shortens commits", () => {
+    expect(displayVersion("1.5.0.4")).toBe("v1.5.0.4");
+    expect(displayVersion("v1.2.0")).toBe("v1.2.0");
+    expect(displayVersion("2c68389aabbcc")).toBe("2c68389");
+    expect(displayVersion("1234567")).toBe("1234567");
+    expect(displayVersion("3")).toBe("v3");
+    expect(displayVersion(null)).toBe("—");
+  });
+});
+
+describe("relativeTime", () => {
+  const now = Date.parse("2026-10-18T12:00:00Z");
+  it("speaks French", () => {
+    expect(relativeTime("2026-10-18T11:59:50Z", now)).toBe("à l'instant");
+    expect(relativeTime("2026-10-18T09:00:00Z", now)).toBe("il y a 3 heures");
+    expect(relativeTime("2026-10-17T12:00:00Z", now)).toBe("hier");
+    expect(relativeTime(null, now)).toBe("jamais");
+  });
+});
+
+describe("form fields", () => {
+  const mode: FieldDef = {
+    key: "MODE",
+    label: "Mode",
+    kind: "select",
+    required: true,
+    default: "a",
+    options: [
+      { value: "a", label: "A" },
+      { value: "b", label: "B" },
+    ],
+  };
+  const net: FieldDef = { key: "NET", label: "Réseau", kind: "text", required: true, when: { key: "MODE", in: ["b"] } };
+  const email: FieldDef = { key: "MAIL", label: "Mail", kind: "email", required: true };
+  const pwd: FieldDef = { key: "PWD", label: "Mot de passe", kind: "password", required: true, minLength: 8 };
+
+  it("applies defaults and conditions", () => {
+    const v = initialValues([mode, net]);
+    expect(v).toEqual({ MODE: "a", NET: "" });
+    expect(isActive(net, v)).toBe(false);
+    expect(validateField(net, v)).toBeNull();
+    v.MODE = "b";
+    expect(validateField(net, v)).toBe("Obligatoire");
+  });
+
+  it("validates kinds", () => {
+    expect(validateField(email, { MAIL: "nope" })).toBe("Adresse e-mail invalide");
+    expect(validateField(email, { MAIL: "a@b.fr" })).toBeNull();
+    expect(validateField(pwd, { PWD: "court" })).toBe("Au moins 8 caractères");
+  });
+});
+
+describe("appStatus", () => {
+  const base = { updateAvailable: false, busyOp: null, state: "ready" } as unknown as Installation;
+  it("prioritises running operations, then updates", () => {
+    expect(appStatus([])).toBe("available");
+    expect(appStatus([base])).toBe("installed");
+    expect(appStatus([base, { ...base, updateAvailable: true }])).toBe("update");
+    expect(appStatus([{ ...base, busyOp: "op1" }, { ...base, updateAvailable: true }])).toBe("installing");
+    expect(appStatus([{ ...base, state: "failed" }])).toBe("failed");
+  });
+});

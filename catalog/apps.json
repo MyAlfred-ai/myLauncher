@@ -1,0 +1,339 @@
+{
+  "schema": 1,
+  "updated": "2026-10-18",
+  "apps": [
+    {
+      "id": "mia",
+      "name": "MIA",
+      "tagline": "Tous les LLM réunis dans une seule interface",
+      "description": "Assistants configurables, bases de connaissances partagées, recherche web native, génération d'images, de vidéos et de présentations, connexion à Google Drive, Gmail et Outlook, avec une administration complète des crédits et des usages.",
+      "icon": "mia.png",
+      "color": "#8b5cf6",
+      "features": [
+        "OpenAI, Anthropic, Mistral, Gemini, modèles locaux…",
+        "Assistants et bases de connaissances (RAG)",
+        "Images, vidéos, pages web et présentations",
+        "Crédits, quotas et usages par utilisateur"
+      ],
+      "repo": { "owner": "MyAlfred-ai", "name": "myLLM", "branch": "main" },
+      "version": { "source": "file", "path": "VERSION" },
+      "changelog": { "source": "file", "path": "docs/NOUVEAUTES.md" },
+      "requirements": ["Docker", "5 Go de disque", "4 Go de mémoire conseillés"],
+      "dotenvQuote": "none",
+      "targets": {
+        "local": {
+          "url": "http://localhost:{{MIA_PORT}}",
+          "duration": "10 à 15 minutes",
+          "notes": [
+            "L'image est construite sur votre poste : comptez une dizaine de minutes la première fois.",
+            "Les clés des fournisseurs d'IA se saisissent ensuite dans MIA : Gestion LLMs → Clés API.",
+            "Conservez le fichier .env du dossier d'installation : sans lui, les clés enregistrées deviennent illisibles."
+          ],
+          "fields": [
+            { "key": "MIA_ADMIN_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
+            { "key": "MIA_ADMIN_NAME", "label": "Nom de l'administrateur", "kind": "text", "default": "Administrateur" },
+            { "key": "MIA_ADMIN_PASSWORD", "label": "Mot de passe administrateur", "kind": "password", "required": true, "minLength": 8, "generate": "password", "help": "Notez-le : il sert à la première connexion." },
+            { "key": "MIA_PORT", "label": "Port local", "kind": "number", "required": true, "default": "8080" }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration et construction", "run": "export MIA_MODE=standalone MIA_PORT MIA_URL=\"http://localhost:${MIA_PORT}\" MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
+            { "label": "Réglages du poste", "run": "ml_dotenv APP_BIND 127.0.0.1\nml_dotenv MIA_WORKERS 2\nml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 300 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas. Consultez le journal ci-dessus.\"" }
+          ],
+          "update": [
+            { "label": "Sauvegarde", "run": "ml_compose up -d db\nbash ./backup.sh" },
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Construction", "run": "ml_compose build" },
+            { "label": "Redémarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 600 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas après la mise à jour. Une sauvegarde a été faite avant (dossier ~/backups).\"" }
+          ]
+        },
+        "server": {
+          "url": "{{MIA_URL}}",
+          "duration": "10 à 20 minutes",
+          "notes": [
+            "MIA ne gère pas le HTTPS lui-même : passez par Traefik ou par un proxy déjà installé.",
+            "Le nom de domaine doit déjà pointer vers le serveur."
+          ],
+          "fields": [
+            { "key": "MIA_URL", "label": "Adresse publique", "kind": "url", "required": true, "placeholder": "https://mia.entreprise.fr" },
+            { "key": "MIA_MODE", "label": "Exposition", "kind": "select", "required": true, "default": "traefik", "options": [
+              { "value": "traefik", "label": "Traefik déjà présent sur le serveur" },
+              { "value": "proxy", "label": "Derrière un proxy existant (nginx, Caddy)" },
+              { "value": "standalone", "label": "Accès direct en HTTP (sans chiffrement)" }
+            ] },
+            { "key": "TRAEFIK_NETWORK", "label": "Réseau Docker de Traefik", "kind": "text", "required": true, "default": "ubuntu_default", "when": { "key": "MIA_MODE", "in": ["traefik"] } },
+            { "key": "TRAEFIK_CERTRESOLVER", "label": "Résolveur de certificats Traefik", "kind": "text", "required": true, "default": "le", "when": { "key": "MIA_MODE", "in": ["traefik"] } },
+            { "key": "MIA_PORT", "label": "Port", "kind": "number", "required": true, "default": "8080", "when": { "key": "MIA_MODE", "in": ["proxy", "standalone"] } },
+            { "key": "MIA_ADMIN_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
+            { "key": "MIA_ADMIN_NAME", "label": "Nom de l'administrateur", "kind": "text", "default": "Administrateur" },
+            { "key": "MIA_ADMIN_PASSWORD", "label": "Mot de passe administrateur", "kind": "password", "required": true, "minLength": 8, "generate": "password" },
+            { "key": "MIA_WORKERS", "label": "Nombre de workers", "kind": "number", "default": "4" }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration et construction", "run": "MIA_DOMAIN=\"${MIA_URL#*://}\"; MIA_DOMAIN=\"${MIA_DOMAIN%%/*}\"\nexport MIA_MODE MIA_URL MIA_DOMAIN MIA_PORT MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD TRAEFIK_NETWORK\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
+            { "label": "Réglages du serveur", "run": "if [ \"$MIA_MODE\" = traefik ]; then ml_dotenv TRAEFIK_NETWORK \"$TRAEFIK_NETWORK\"; ml_dotenv TRAEFIK_CERTRESOLVER \"$TRAEFIK_CERTRESOLVER\"; fi\nml_dotenv MIA_WORKERS \"${MIA_WORKERS:-4}\"\nml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 300 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas. Consultez le journal ci-dessus.\"" }
+          ],
+          "update": [
+            { "label": "Sauvegarde", "run": "ml_compose up -d db\nbash ./backup.sh" },
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Construction", "run": "ml_compose build" },
+            { "label": "Redémarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 600 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas après la mise à jour. Une sauvegarde a été faite avant (dossier ~/backups).\"" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mybrief",
+      "name": "myBrief",
+      "tagline": "Vos réunions résumées, vos actions suivies",
+      "description": "Enregistrement audio, transcription en temps réel, compte rendu par IA selon vos modèles, détection des actions, puis envoi ou dépôt du document sur votre Drive. Existe aussi sur iOS, Android et en extension Chrome.",
+      "icon": "mybrief.png",
+      "color": "#f76e21",
+      "features": [
+        "Transcription en temps réel",
+        "Comptes rendus selon vos modèles",
+        "Détection automatique des actions",
+        "Apps iOS, Android et extension Chrome"
+      ],
+      "repo": { "owner": "MyAlfred-ai", "name": "myBrief", "branch": "main" },
+      "version": { "source": "file", "path": "src/version.json", "jsonKey": "version" },
+      "changelog": { "source": "file", "path": "NOUVEAUTES.md" },
+      "requirements": ["Docker", "Ports 80 et 443 libres", "Clé OpenAI pour l'IA"],
+      "dotenvQuote": "none",
+      "targets": {
+        "local": {
+          "experimental": true,
+          "workdir": "install",
+          "url": "https://localhost",
+          "duration": "5 minutes",
+          "notes": [
+            "myBrief est conçu pour un serveur avec nom de domaine : l'installation locale sert à l'essayer.",
+            "Les ports 80 et 443 du poste doivent être libres.",
+            "Le navigateur signalera un certificat non reconnu (certificat local) : acceptez-le pour continuer.",
+            "Sur Mac Apple Silicon, les images Intel sont émulées : l'application est plus lente."
+          ],
+          "fields": [
+            { "key": "ADMIN_SEED_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
+            { "key": "ADMIN_SEED_PASSWORD", "label": "Mot de passe provisoire", "kind": "password", "required": true, "minLength": 8, "generate": "password", "help": "À changer à la première connexion." },
+            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…", "help": "Facultative : elle peut être saisie plus tard dans Administration → IA." }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "[ -f .env ] || cp env.example .env\nchmod 600 .env\nml_dotenv DOMAIN localhost\nml_dotenv ACME_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv_default MONGO_PASS \"$(ml_rand_hex 24)\"\nml_dotenv_default CONNECTIONS_ENC_KEY \"$(ml_rand_hex 32)\"\nml_dotenv ADMIN_SEED_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv ADMIN_SEED_PASSWORD \"$ADMIN_SEED_PASSWORD\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\"" },
+            { "label": "Téléchargement des images", "run": "ml_pull" },
+            { "label": "Démarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas. Consultez le journal ci-dessus.\"" }
+          ],
+          "update": [
+            { "label": "Sauvegarde de la base", "run": "ml_compose up -d mongo\nbash ./install.sh backup" },
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Téléchargement des images", "run": "ml_pull" },
+            { "label": "Redémarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas après la mise à jour. Sauvegarde disponible dans install/backups.\"" }
+          ]
+        },
+        "server": {
+          "workdir": "install",
+          "url": "https://{{DOMAIN}}",
+          "duration": "5 minutes",
+          "notes": [
+            "Le nom de domaine doit déjà pointer vers le serveur.",
+            "En mode serveur dédié, les ports 80 et 443 doivent être libres et ouverts."
+          ],
+          "fields": [
+            { "key": "DOMAIN", "label": "Nom de domaine", "kind": "text", "required": true, "placeholder": "brief.entreprise.fr" },
+            { "key": "PROXY_MODE", "label": "Exposition", "kind": "select", "required": true, "default": "complet", "options": [
+              { "value": "complet", "label": "Serveur dédié : HTTPS inclus (ports 80 et 443)" },
+              { "value": "traefik", "label": "Traefik déjà présent sur le serveur" }
+            ] },
+            { "key": "ACME_EMAIL", "label": "E-mail pour les certificats Let's Encrypt", "kind": "email", "required": true, "when": { "key": "PROXY_MODE", "in": ["complet"] } },
+            { "key": "TRAEFIK_NETWORK", "label": "Réseau Docker de Traefik", "kind": "text", "required": true, "when": { "key": "PROXY_MODE", "in": ["traefik"] } },
+            { "key": "TRAEFIK_ENTRYPOINT", "label": "Point d'entrée HTTPS de Traefik", "kind": "text", "required": true, "default": "websecure", "when": { "key": "PROXY_MODE", "in": ["traefik"] } },
+            { "key": "TRAEFIK_CERTRESOLVER", "label": "Résolveur de certificats Traefik", "kind": "text", "required": true, "default": "myresolver", "when": { "key": "PROXY_MODE", "in": ["traefik"] } },
+            { "key": "ADMIN_SEED_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true },
+            { "key": "ADMIN_SEED_PASSWORD", "label": "Mot de passe provisoire", "kind": "password", "required": true, "minLength": 8, "generate": "password", "help": "À changer à la première connexion." },
+            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…", "help": "Facultative : elle peut être saisie plus tard dans Administration → IA." }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "[ -f .env ] || cp env.example .env\nchmod 600 .env\nml_dotenv DOMAIN \"$DOMAIN\"\nif [ \"$PROXY_MODE\" = traefik ]; then\n  ml_dotenv COMPOSE_FILE docker-compose.proxy.yml\n  ml_dotenv TRAEFIK_NETWORK \"$TRAEFIK_NETWORK\"\n  ml_dotenv TRAEFIK_ENTRYPOINT \"$TRAEFIK_ENTRYPOINT\"\n  ml_dotenv TRAEFIK_CERTRESOLVER \"$TRAEFIK_CERTRESOLVER\"\nelse\n  ml_dotenv ACME_EMAIL \"$ACME_EMAIL\"\nfi\nml_dotenv_default MONGO_PASS \"$(ml_rand_hex 24)\"\nml_dotenv_default CONNECTIONS_ENC_KEY \"$(ml_rand_hex 32)\"\nml_dotenv ADMIN_SEED_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv ADMIN_SEED_PASSWORD \"$ADMIN_SEED_PASSWORD\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\"" },
+            { "label": "Téléchargement des images", "run": "ml_pull" },
+            { "label": "Démarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas. Consultez le journal ci-dessus.\"" }
+          ],
+          "update": [
+            { "label": "Sauvegarde de la base", "run": "ml_compose up -d mongo\nbash ./install.sh backup" },
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Téléchargement des images", "run": "ml_pull" },
+            { "label": "Redémarrage", "run": "ml_compose up -d" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas après la mise à jour. Sauvegarde disponible dans install/backups.\"" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mytrix",
+      "name": "myTrix",
+      "tagline": "Le classement documentaire intelligent",
+      "description": "Réorganise et maintient vos arborescences de fichiers (dossiers locaux, Google Drive, OneDrive) selon des règles claires, avec l'aide de l'IA.",
+      "icon": "mytrix.png",
+      "color": "#ec0c7e",
+      "features": [
+        "Inventaire et classement assistés",
+        "Dossiers locaux, Google Drive et OneDrive",
+        "Agent local en lecture seule par défaut",
+        "Sauvegardes chiffrées et vérifiées"
+      ],
+      "repo": { "owner": "MyAlfred-ai", "name": "mytrix", "branch": "main" },
+      "version": { "source": "commit" },
+      "changelog": { "source": "file", "path": "CHANGELOG.md" },
+      "requirements": ["Docker", "Client OAuth Google", "Chrome ou Firefox"],
+      "dotenvQuote": "single",
+      "targets": {
+        "local": {
+          "url": "http://localhost:3000",
+          "duration": "10 minutes",
+          "notes": [
+            "Connexion par Google : créez d'abord un client OAuth « Application Web » (audience Interne) avec l'URI de redirection http://localhost:3000/api/auth/callback/google.",
+            "Ouvrez myTrix dans Chrome ou Firefox : Safari bloque la connexion sur http://localhost.",
+            "Pour brancher un dossier du poste, suivez ensuite les indications de l'application (commande « ./mytrix agent »)."
+          ],
+          "fields": [
+            { "key": "ADMIN_EMAIL", "label": "Votre adresse professionnelle", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr", "help": "Vous serez administrateur ; votre domaine sera autorisé à se connecter." },
+            { "key": "AUTH_GOOGLE_CLIENT_ID", "label": "Identifiant client Google", "kind": "text", "required": true, "placeholder": "…apps.googleusercontent.com" },
+            { "key": "AUTH_GOOGLE_CLIENT_SECRET", "label": "Code secret du client Google", "kind": "secret", "required": true }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "ADMIN_EMAIL=\"$(printf '%s' \"$ADMIN_EMAIL\" | tr '[:upper:]' '[:lower:]')\"\nif [ ! -f .env ]; then\n  (umask 077 && cp .env.example .env)\n  pg=\"$(ml_rand_hex 24)\"\n  ml_dotenv APP_URL http://localhost:3000\n  ml_dotenv BETTER_AUTH_URL http://localhost:3000\n  ml_dotenv DATABASE_URL \"postgresql://app:${pg}@localhost:5432/mytrix\"\n  ml_dotenv POSTGRES_PASSWORD \"$pg\"\n  ml_dotenv APP_ENCRYPTION_KEY \"$(ml_rand_b64 32)\"\n  ml_dotenv BETTER_AUTH_SECRET \"$(ml_rand_b64 32)\"\n  ml_dotenv BACKUP_ENCRYPTION_KEY \"$(ml_rand_b64 32)\"\n  ml_dotenv DEPLOY_PROFILE interne\n  ml_dotenv APP_VERSION dev\n  ml_dotenv BACKUP_DIR ./backups\n  ml_dotenv COMPOSE_FILE compose.yml:compose.interne.yml\nfi\nml_dotenv AUTH_ALLOWED_DOMAINS \"${ADMIN_EMAIL#*@}\"\nml_dotenv AUTH_GOOGLE_CLIENT_ID \"$AUTH_GOOGLE_CLIENT_ID\"\nml_dotenv AUTH_GOOGLE_CLIENT_SECRET \"$AUTH_GOOGLE_CLIENT_SECRET\"" },
+            { "label": "Construction et démarrage", "run": "bash ./mytrix installer" },
+            { "label": "Invitation de l'administrateur", "run": "bash ./mytrix inviter \"$ADMIN_EMAIL\" administrateur || ml_warn \"Invitation non créée : elle existe peut-être déjà.\"" }
+          ],
+          "update": [
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Sauvegarde, construction et migration", "run": "bash ./mytrix mettre-a-jour" }
+          ],
+          "start": [{ "label": "Démarrage", "run": "bash ./mytrix demarrer" }],
+          "stop": [{ "label": "Arrêt", "run": "bash ./mytrix arreter" }]
+        },
+        "server": {
+          "experimental": true,
+          "url": "https://{{PUBLIC_HOSTNAME}}",
+          "duration": "15 minutes",
+          "notes": [
+            "Aucune image publiée pour l'instant : les images sont construites sur le serveur (4 Go de mémoire conseillés).",
+            "Le nom de domaine doit pointer vers le serveur ; les ports 80 et 443 doivent être libres.",
+            "URI de redirection Google : https://<votre domaine>/api/auth/callback/google."
+          ],
+          "fields": [
+            { "key": "PUBLIC_HOSTNAME", "label": "Nom de domaine", "kind": "text", "required": true, "placeholder": "trix.entreprise.fr" },
+            { "key": "ACME_EMAIL", "label": "E-mail pour les certificats Let's Encrypt", "kind": "email", "required": true },
+            { "key": "ADMIN_EMAIL", "label": "Adresse de l'administrateur", "kind": "email", "required": true, "help": "Son domaine sera autorisé à se connecter." },
+            { "key": "AUTH_GOOGLE_CLIENT_ID", "label": "Identifiant client Google", "kind": "text", "required": true, "placeholder": "…apps.googleusercontent.com" },
+            { "key": "AUTH_GOOGLE_CLIENT_SECRET", "label": "Code secret du client Google", "kind": "secret", "required": true }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "ADMIN_EMAIL=\"$(printf '%s' \"$ADMIN_EMAIL\" | tr '[:upper:]' '[:lower:]')\"\nif [ ! -f .env ]; then\n  (umask 077 && cp .env.example .env)\n  pg=\"$(ml_rand_hex 24)\"\n  ml_dotenv DATABASE_URL \"postgresql://app:${pg}@localhost:5432/mytrix\"\n  ml_dotenv POSTGRES_PASSWORD \"$pg\"\n  ml_dotenv APP_ENCRYPTION_KEY \"$(ml_rand_b64 32)\"\n  ml_dotenv BETTER_AUTH_SECRET \"$(ml_rand_b64 32)\"\n  ml_dotenv BACKUP_ENCRYPTION_KEY \"$(ml_rand_b64 32)\"\n  ml_dotenv APP_VERSION dev\n  ml_dotenv BACKUP_DIR ./backups\nfi\nml_dotenv APP_URL \"https://$PUBLIC_HOSTNAME\"\nml_dotenv BETTER_AUTH_URL \"https://$PUBLIC_HOSTNAME\"\nml_dotenv PUBLIC_HOSTNAME \"$PUBLIC_HOSTNAME\"\nml_dotenv ACME_EMAIL \"$ACME_EMAIL\"\nml_dotenv DEPLOY_PROFILE public\nml_dotenv NODE_ENV production\nml_dotenv COMPOSE_FILE compose.yml:compose.public.yml\nml_dotenv AUTH_ALLOWED_DOMAINS \"${ADMIN_EMAIL#*@}\"\nml_dotenv AUTH_GOOGLE_CLIENT_ID \"$AUTH_GOOGLE_CLIENT_ID\"\nml_dotenv AUTH_GOOGLE_CLIENT_SECRET \"$AUTH_GOOGLE_CLIENT_SECRET\"" },
+            { "label": "Construction et démarrage", "run": "bash ./mytrix installer" },
+            { "label": "Invitation de l'administrateur", "run": "bash ./mytrix inviter \"$ADMIN_EMAIL\" administrateur || ml_warn \"Invitation non créée : elle existe peut-être déjà.\"" }
+          ],
+          "update": [
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Sauvegarde, construction et migration", "run": "bash ./mytrix mettre-a-jour" }
+          ],
+          "start": [{ "label": "Démarrage", "run": "bash ./mytrix demarrer" }],
+          "stop": [{ "label": "Arrêt", "run": "bash ./mytrix arreter" }]
+        }
+      }
+    },
+    {
+      "id": "mybrain",
+      "name": "myBrain",
+      "tagline": "Le cerveau partagé de votre équipe",
+      "description": "Un wiki d'équipe en Markdown, tenu à jour tout seul à partir de vos mails, documents et pages web, interrogeable en langage naturel. Chaque fait garde sa source.",
+      "icon": "mybrain.png",
+      "color": "#5e55d1",
+      "features": [
+        "Ingestion des mails, documents Drive et pages web",
+        "Faits datés et sourcés, rangés dans les bonnes fiches",
+        "Réponses en langage naturel, avec citations",
+        "Accès par personne via Google"
+      ],
+      "repo": { "owner": "MyAlfred-ai", "name": "mybrain", "branch": "main" },
+      "version": { "source": "commit" },
+      "changelog": { "source": "commits" },
+      "requirements": ["Docker", "Google Workspace", "4 Go de mémoire pour la construction"],
+      "dotenvQuote": "none",
+      "targets": {
+        "local": {
+          "url": "http://localhost:5173",
+          "duration": "5 à 10 minutes",
+          "notes": [
+            "Connexion uniquement par Google Workspace : créez un client OAuth « Application Web » avec l'URI de redirection http://localhost:5173/auth/callback/google.",
+            "Docker Desktop doit disposer d'au moins 4 Go de mémoire pour la construction.",
+            "Les clés OpenAI et Anthropic peuvent aussi être saisies plus tard dans l'application."
+          ],
+          "fields": [
+            { "key": "MYBRAIN_ADMIN_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
+            { "key": "ALLOWED_EMAIL_DOMAIN", "label": "Domaine autorisé à se connecter", "kind": "text", "placeholder": "entreprise.fr", "help": "Par défaut, celui de l'administrateur." },
+            { "key": "AUTH_GOOGLE_ID", "label": "Identifiant client Google", "kind": "text", "required": true, "placeholder": "…apps.googleusercontent.com" },
+            { "key": "AUTH_GOOGLE_SECRET", "label": "Code secret du client Google", "kind": "secret", "required": true },
+            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…" },
+            { "key": "ANTHROPIC_API_KEY", "label": "Clé API Anthropic", "kind": "secret", "placeholder": "sk-ant-…" }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "[ -f .env ] || cp .env.example .env\n[ -f web/.env ] || cp web/.env.example web/.env\nchmod 600 .env web/.env\nml_dotenv COMPOSE_FILE docker-compose.yml:docker-compose.local.yml\nW=web/.env\nml_dotenv ORIGIN http://localhost:5173 \"$W\"\nml_dotenv MYBRAIN_ADMIN_EMAIL \"$MYBRAIN_ADMIN_EMAIL\" \"$W\"\nml_dotenv ALLOWED_EMAIL_DOMAIN \"${ALLOWED_EMAIL_DOMAIN:-${MYBRAIN_ADMIN_EMAIL#*@}}\" \"$W\"\nml_dotenv AUTH_GOOGLE_ID \"$AUTH_GOOGLE_ID\" \"$W\"\nml_dotenv AUTH_GOOGLE_SECRET \"$AUTH_GOOGLE_SECRET\" \"$W\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\" \"$W\"\n[ -z \"$ANTHROPIC_API_KEY\" ] || ml_dotenv ANTHROPIC_API_KEY \"$ANTHROPIC_API_KEY\" \"$W\"" },
+            { "label": "Construction et démarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_http_ok http://localhost:5173/.well-known/oauth-protected-resource || ml_fail \"myBrain ne répond pas sur le port 5173.\"" }
+          ],
+          "update": [
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Construction et redémarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_http_ok http://localhost:5173/.well-known/oauth-protected-resource || ml_fail \"myBrain ne répond pas après la mise à jour.\"" }
+          ]
+        },
+        "server": {
+          "url": "https://{{MYBRAIN_DOMAIN}}",
+          "duration": "10 minutes",
+          "notes": [
+            "Serveur Linux (Ubuntu conseillé), 4 Go de mémoire. Le nom de domaine doit pointer vers le serveur.",
+            "URI de redirection Google : https://<votre domaine>/auth/callback/google.",
+            "Une sauvegarde nocturne est programmée sur le serveur (cron)."
+          ],
+          "fields": [
+            { "key": "MYBRAIN_DOMAIN", "label": "Nom de domaine", "kind": "text", "required": true, "placeholder": "brain.entreprise.fr" },
+            { "key": "MYBRAIN_PROXY", "label": "Exposition", "kind": "select", "required": true, "default": "integre", "options": [
+              { "value": "integre", "label": "Serveur dédié : HTTPS inclus (ports 80 et 443)" },
+              { "value": "externe", "label": "Traefik déjà présent sur le serveur" }
+            ] },
+            { "key": "MYBRAIN_ACME_EMAIL", "label": "E-mail pour les certificats Let's Encrypt", "kind": "email", "required": true, "when": { "key": "MYBRAIN_PROXY", "in": ["integre"] } },
+            { "key": "TRAEFIK_NETWORK", "label": "Réseau Docker de Traefik", "kind": "text", "required": true, "default": "proxy", "when": { "key": "MYBRAIN_PROXY", "in": ["externe"] } },
+            { "key": "MYBRAIN_ADMIN_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true },
+            { "key": "ALLOWED_EMAIL_DOMAIN", "label": "Domaine autorisé à se connecter", "kind": "text", "placeholder": "entreprise.fr", "help": "Par défaut, celui de l'administrateur." },
+            { "key": "AUTH_GOOGLE_ID", "label": "Identifiant client Google", "kind": "text", "required": true, "placeholder": "…apps.googleusercontent.com" },
+            { "key": "AUTH_GOOGLE_SECRET", "label": "Code secret du client Google", "kind": "secret", "required": true },
+            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…" },
+            { "key": "ANTHROPIC_API_KEY", "label": "Clé API Anthropic", "kind": "secret", "placeholder": "sk-ant-…" }
+          ],
+          "install": [
+            { "label": "Récupération du code", "run": "@sync" },
+            { "label": "Configuration", "run": "[ -f .env ] || cp .env.example .env\n[ -f web/.env ] || cp web/.env.example web/.env\nchmod 600 .env web/.env\nml_dotenv MYBRAIN_DOMAIN \"$MYBRAIN_DOMAIN\"\nml_dotenv MYBRAIN_PROXY \"$MYBRAIN_PROXY\"\nif [ \"$MYBRAIN_PROXY\" = externe ]; then\n  ml_dotenv TRAEFIK_NETWORK \"$TRAEFIK_NETWORK\"\n  ml_dotenv COMPOSE_FILE docker-compose.yml:docker-compose.prod.yml\nelse\n  ml_dotenv MYBRAIN_ACME_EMAIL \"$MYBRAIN_ACME_EMAIL\"\n  ml_dotenv COMPOSE_FILE docker-compose.yml:docker-compose.proxy.yml\nfi\nW=web/.env\nml_dotenv ORIGIN \"https://$MYBRAIN_DOMAIN\" \"$W\"\nml_dotenv MYBRAIN_ADMIN_EMAIL \"$MYBRAIN_ADMIN_EMAIL\" \"$W\"\nml_dotenv ALLOWED_EMAIL_DOMAIN \"${ALLOWED_EMAIL_DOMAIN:-${MYBRAIN_ADMIN_EMAIL#*@}}\" \"$W\"\nml_dotenv AUTH_GOOGLE_ID \"$AUTH_GOOGLE_ID\" \"$W\"\nml_dotenv AUTH_GOOGLE_SECRET \"$AUTH_GOOGLE_SECRET\" \"$W\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\" \"$W\"\n[ -z \"$ANTHROPIC_API_KEY\" ] || ml_dotenv ANTHROPIC_API_KEY \"$ANTHROPIC_API_KEY\" \"$W\"" },
+            { "label": "Construction et démarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh prod --no-pull --no-hook" }
+          ],
+          "update": [
+            { "label": "Sauvegarde", "run": "bash ./deploy/sauvegarde.sh --type manuel --note \"avant mise à jour\" || ml_warn \"Sauvegarde non réalisée : vérifiez la configuration des sauvegardes du serveur.\"" },
+            { "label": "Récupération de la nouvelle version", "run": "@sync" },
+            { "label": "Construction et redémarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh prod --no-pull --no-hook" }
+          ]
+        }
+      }
+    }
+  ]
+}
