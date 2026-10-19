@@ -12,7 +12,7 @@ use crate::exec;
 use crate::github::Gh;
 use crate::ops::{self, LogLine, OpInfo, OpRequest};
 use crate::script::{self, Action, Plan};
-use crate::state::{now, state, LatestState};
+use crate::state::{now, state, LatestState, LauncherUpdateState};
 use crate::store::{check_dir, InstallState, Installation, Settings};
 use crate::{secrets, updates, version};
 
@@ -37,6 +37,7 @@ pub struct Overview {
     pub settings: Settings,
     pub has_token: bool,
     pub last_check: Option<String>,
+    pub launcher_update: LauncherUpdateState,
     pub platform: String,
     pub launcher_version: String,
 }
@@ -77,6 +78,7 @@ pub fn get_overview(app: AppHandle) -> Overview {
         .collect();
     let settings = st.settings.read().unwrap().clone();
     let last_check = st.last_check.read().unwrap().clone();
+    let launcher_update = st.launcher_update.read().unwrap().clone();
     Overview {
         catalog: catalog.catalog.clone(),
         catalog_source: catalog.source.clone(),
@@ -87,8 +89,10 @@ pub fn get_overview(app: AppHandle) -> Overview {
         settings,
         has_token: st.token().is_some(),
         last_check,
+        launcher_update,
         platform: std::env::consts::OS.into(),
-        launcher_version: env!("CARGO_PKG_VERSION").into(),
+        // The version the updater compares with (tauri.conf.json).
+        launcher_version: app.package_info().version.to_string(),
     }
 }
 
@@ -96,6 +100,18 @@ pub fn get_overview(app: AppHandle) -> Overview {
 pub async fn check_updates(app: AppHandle) -> Result<Overview> {
     updates::check_all(&app).await;
     Ok(get_overview(app))
+}
+
+#[tauri::command]
+pub async fn check_launcher_update(app: AppHandle) -> LauncherUpdateState {
+    updates::check_launcher(&app).await;
+    let lu = state(&app).launcher_update.read().unwrap().clone();
+    lu
+}
+
+#[tauri::command]
+pub async fn install_launcher_update(app: AppHandle) -> Result<()> {
+    updates::install_launcher(&app).await
 }
 
 #[tauri::command]

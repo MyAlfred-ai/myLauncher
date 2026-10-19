@@ -51,7 +51,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let state = state::AppState::load(app.handle())?;
@@ -63,6 +62,8 @@ pub fn run() {
             commands::get_overview,
             commands::check_updates,
             commands::get_changelog,
+            commands::check_launcher_update,
+            commands::install_launcher_update,
             commands::save_settings,
             commands::github_status,
             commands::set_github_token,

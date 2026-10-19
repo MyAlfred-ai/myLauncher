@@ -4,9 +4,10 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::catalog::{Catalog, VersionSource};
-use crate::error::Result;
+use crate::error::{bail, Error, Result};
 use crate::github::Gh;
 use crate::ops::OpInfo;
 use crate::script::Action;
@@ -70,6 +71,74 @@ pub async fn check_all(app: &AppHandle) {
     *st.last_check.write().unwrap() = Some(now());
     let _ = app.emit("overview-changed", ());
     handle_new_updates(app);
+    check_launcher(app).await;
+}
+
+/// Looks for a newer launcher (signed GitHub release) and announces it once.
+pub async fn check_launcher(app: &AppHandle) {
+    let found = match app.updater() {
+        Ok(u) => u.check().await.map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    let st = state(app);
+    let version = {
+        let mut lu = st.launcher_update.write().unwrap();
+        lu.checked_at = Some(now());
+        match found {
+            Ok(update) => {
+                lu.version = update.map(|u| u.version);
+                lu.error = None;
+            }
+            // Offline, or releases not reachable yet (private repository):
+            // keep what was known, the UI shows the error on demand.
+            Err(e) => {
+                log::info!("mise à jour du launcher indisponible : {e}");
+                lu.error = Some(e);
+            }
+        }
+        lu.version.clone()
+    };
+    if let Some(v) = version {
+        let first_time = {
+            let mut store = st.store.write().unwrap();
+            let first = store.launcher_notified.as_deref() != Some(v.as_str());
+            store.launcher_notified = Some(v.clone());
+            first
+        };
+        if first_time {
+            let _ = st.save_store();
+            if st.settings.read().unwrap().notify {
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title("Nouvelle version du launcher")
+                    .body(format!(
+                        "MyAlfred Launcher {v} est disponible : ouvrez le launcher pour l'installer."
+                    ))
+                    .show();
+            }
+        }
+    }
+    let _ = app.emit("overview-changed", ());
+}
+
+/// Downloads, verifies and installs the new launcher, then restarts it.
+pub async fn install_launcher(app: &AppHandle) -> Result<()> {
+    if state(app).ops.list().iter().any(|o| o.status == "running") {
+        bail!("Une opération est en cours : attendez qu'elle se termine pour mettre à jour le launcher.");
+    }
+    let update = app
+        .updater()
+        .map_err(|e| Error::msg(e.to_string()))?
+        .check()
+        .await
+        .map_err(|e| Error::msg(format!("Vérification impossible : {e}")))?
+        .ok_or_else(|| Error::msg("Le launcher est déjà à jour."))?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| Error::msg(format!("Installation impossible : {e}")))?;
+    app.restart()
 }
 
 fn handle_new_updates(app: &AppHandle) {

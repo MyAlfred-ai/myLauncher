@@ -4,6 +4,7 @@
   import Icon, { type IconName } from "./lib/components/Icon.svelte";
   import Toasts from "./lib/components/Toasts.svelte";
   import InstallDialog from "./lib/components/InstallDialog.svelte";
+  import LauncherBanner from "./lib/components/LauncherBanner.svelte";
   import Library from "./lib/views/Library.svelte";
   import AppDetail from "./lib/views/AppDetail.svelte";
   import Contact from "./lib/views/Contact.svelte";
@@ -84,24 +85,27 @@
       </div>
     {:else if !launcher.overview}
       <div class="fatal"><Icon name="loader" size={28} class="spin" /></div>
-    {:else if launcher.view.name === "library"}
-      <Library />
-    {:else if launcher.view.name === "app"}
-      {#key launcher.view.id}
-        <AppDetail id={launcher.view.id} tab={launcher.view.tab} />
-      {/key}
-    {:else if launcher.view.name === "contact"}
-      {#key launcher.view.appId}
-        <Contact appId={launcher.view.appId} />
-      {/key}
-    {:else if launcher.view.name === "activity"}
-      <Activity />
-    {:else if launcher.view.name === "op"}
-      {#key launcher.view.id}
-        <OpView id={launcher.view.id} />
-      {/key}
-    {:else if launcher.view.name === "settings"}
-      <SettingsView />
+    {:else}
+      <LauncherBanner />
+      {#if launcher.view.name === "library"}
+        <Library />
+      {:else if launcher.view.name === "app"}
+        {#key launcher.view.id}
+          <AppDetail id={launcher.view.id} tab={launcher.view.tab} />
+        {/key}
+      {:else if launcher.view.name === "contact"}
+        {#key launcher.view.appId}
+          <Contact appId={launcher.view.appId} />
+        {/key}
+      {:else if launcher.view.name === "activity"}
+        <Activity />
+      {:else if launcher.view.name === "op"}
+        {#key launcher.view.id}
+          <OpView id={launcher.view.id} />
+        {/key}
+      {:else if launcher.view.name === "settings"}
+        <SettingsView />
+      {/if}
     {/if}
   </main>
 </div>

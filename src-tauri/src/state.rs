@@ -20,6 +20,16 @@ pub struct LatestState {
     pub checked_at: String,
 }
 
+/// Newer version of the launcher itself, found by the updater.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherUpdateState {
+    /// Version ready to install; `None` when the launcher is up to date.
+    pub version: Option<String>,
+    pub error: Option<String>,
+    pub checked_at: Option<String>,
+}
+
 pub struct CatalogState {
     pub catalog: Catalog,
     /// `embedded`, `cache` or `remote`.
@@ -35,6 +45,7 @@ pub struct AppState {
     pub catalog: RwLock<CatalogState>,
     pub latest: RwLock<HashMap<String, LatestState>>,
     pub last_check: RwLock<Option<String>>,
+    pub launcher_update: RwLock<LauncherUpdateState>,
     pub token: RwLock<Option<String>>,
     pub ops: OpManager,
 }
@@ -77,6 +88,7 @@ impl AppState {
             catalog: RwLock::new(catalog),
             latest: RwLock::new(HashMap::new()),
             last_check: RwLock::new(None),
+            launcher_update: RwLock::new(LauncherUpdateState::default()),
             token: RwLock::new(secrets::get_token()),
             ops: OpManager::default(),
         })

@@ -112,6 +112,8 @@ impl Installation {
 #[serde(rename_all = "camelCase", default)]
 pub struct Store {
     pub installations: Vec<Installation>,
+    /// Launcher version already announced by a notification.
+    pub launcher_notified: Option<String>,
 }
 
 impl Store {

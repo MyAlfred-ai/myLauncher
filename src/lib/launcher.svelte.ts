@@ -36,6 +36,10 @@ class Launcher {
   checking = $state(false);
   /** App whose install dialog is open. */
   installing = $state<{ appId: string } | null>(null);
+  /** The launcher's own update, checked or installed from the banner or the settings. */
+  selfUpdate = $state<"idle" | "checking" | "installing">("idle");
+  /** Launcher version put off with « Plus tard », until the next start. */
+  launcherLater = $state<string | null>(null);
   /** Containers' state per installation, shared by the library and the app page. */
   runtime = $state<Record<string, Runtime>>({});
 
@@ -143,6 +147,31 @@ class Launcher {
     this.runtime[installationId] = { status, loading: false, at: Date.now() };
     // An operation ended while this reading was under way: read again.
     if (this.#statusAgain.delete(installationId)) await this.refreshStatus(installationId, true);
+  }
+
+  async checkLauncher() {
+    if (this.selfUpdate !== "idle") return;
+    this.selfUpdate = "checking";
+    try {
+      const lu = await api.checkLauncherUpdate();
+      if (this.overview) this.overview.launcherUpdate = lu;
+    } catch (e) {
+      this.toast(String(e), "error");
+    } finally {
+      this.selfUpdate = "idle";
+    }
+  }
+
+  /** Installs the new launcher; on success it restarts and this never returns. */
+  async installLauncher() {
+    if (this.selfUpdate !== "idle") return;
+    this.selfUpdate = "installing";
+    try {
+      await api.installLauncherUpdate();
+    } catch (e) {
+      this.toast(String(e), "error");
+    }
+    this.selfUpdate = "idle";
   }
 
   async checkUpdates() {

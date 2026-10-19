@@ -66,6 +66,7 @@ const ops: OpInfo[] = [];
 const logs = new Map<string, LogLine[]>();
 let seq = 0;
 let hasToken = true;
+let launcherUpdate: Overview["launcherUpdate"] = { version: "0.2.0", error: null, checkedAt: ago(0.2) };
 
 const latest = () => ({
   mia: { latest: { version: "1.5.0.4", refKind: "branch", refName: "main", commit: "f00ba44", date: ago(5), summary: "feat: recherche web Mistral" }, error: null, checkedAt: ago(0.2) },
@@ -88,6 +89,7 @@ function overview(): Overview {
     settings,
     hasToken,
     lastCheck: ago(0.2),
+    launcherUpdate,
     platform: "macos",
     launcherVersion: "0.1.0",
   };
@@ -173,6 +175,15 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       return overview() as T;
     case "get_changelog":
       return `## Nouveautés\n\n### Recherche web native\nChaque fournisseur utilise désormais son propre outil de recherche.\n\n### Assistants\n- Appel d'un assistant avec **@nom** depuis la saisie\n- Jusqu'à 3 bases de connaissances par conversation\n\n### Corrections\n- Export PDF des conversations longues\n` as T;
+    case "check_launcher_update":
+      launcherUpdate = { ...launcherUpdate, checkedAt: new Date().toISOString() };
+      return launcherUpdate as T;
+    case "install_launcher_update":
+      // The real launcher restarts here; the demo pretends it came back up to date.
+      await new Promise((r) => setTimeout(r, 2000));
+      launcherUpdate = { version: null, error: null, checkedAt: new Date().toISOString() };
+      emit("overview-changed", null);
+      return undefined as T;
     case "save_settings":
       settings = a.settings;
       return settings as T;

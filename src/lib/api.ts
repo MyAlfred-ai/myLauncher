@@ -1,5 +1,6 @@
 import type {
   HostCheck,
+  LauncherUpdate,
   LogLine,
   OpInfo,
   Overview,
@@ -33,6 +34,8 @@ export const api = {
   overview: () => call<Overview>("get_overview"),
   checkUpdates: () => call<Overview>("check_updates"),
   changelog: (appId: string) => call<string>("get_changelog", { appId }),
+  checkLauncherUpdate: () => call<LauncherUpdate>("check_launcher_update"),
+  installLauncherUpdate: () => call<void>("install_launcher_update"),
   saveSettings: (settings: Settings) => call<Settings>("save_settings", { settings }),
   githubStatus: () => call<TokenStatus>("github_status"),
   setGithubToken: (token: string) => call<TokenStatus>("set_github_token", { token }),

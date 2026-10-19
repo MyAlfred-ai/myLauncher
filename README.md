@@ -20,7 +20,9 @@ toute une équipe, est proposée par MyAlfred.ai (page « Infos & contact » du 
 - **Infos & contact** : offres de MyAlfred.ai pour une installation sur serveur (installation,
   hébergement en Europe, maintenance, formation), prise de rendez-vous, formulaire et e-mail.
   Les liens sont dans [src/lib/contact.ts](src/lib/contact.ts).
-- **Mise à jour du launcher lui-même** : paquets signés, vérifiés avant installation.
+- **Mise à jour du launcher lui-même** : recherchée au démarrage puis à intervalle régulier,
+  notification et bandeau « Installer et redémarrer » ; paquets signés, vérifiés avant
+  installation ; refusée tant qu'une installation ou une mise à jour d'application est en cours.
 - Interface en français, thème clair/sombre, utilisable de 380 px à plein écran.
 
 ## Fonctionnement

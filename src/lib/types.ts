@@ -122,6 +122,13 @@ export interface LogLine {
   text: string;
 }
 
+export interface LauncherUpdate {
+  /** Version ready to install; null when the launcher is up to date. */
+  version: string | null;
+  error: string | null;
+  checkedAt: string | null;
+}
+
 export interface Overview {
   catalog: Catalog;
   catalogSource: "embedded" | "cache" | "remote";
@@ -132,6 +139,7 @@ export interface Overview {
   settings: Settings;
   hasToken: boolean;
   lastCheck: string | null;
+  launcherUpdate: LauncherUpdate;
   platform: string;
   launcherVersion: string;
 }

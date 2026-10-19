@@ -11,8 +11,6 @@
     "opener:allow-reveal-item-in-dir",
     "dialog:allow-open",
     "dialog:allow-ask",
-    "notification:default",
-    "updater:default",
-    "process:allow-restart"
+    "notification:default"
   ]
 }

@@ -12,7 +12,7 @@
   let tokenStatus = $state<TokenStatus | null>(null);
   let savingToken = $state(false);
   let tokenError = $state<string | null>(null);
-  let selfUpdate = $state<{ state: "idle" | "checking" | "none" | "available" | "installing" | "error"; version?: string; error?: string }>({ state: "idle" });
+  const lu = $derived(o.launcherUpdate);
 
   onMount(async () => {
     tokenStatus = await api.githubStatus().catch(() => null);
@@ -52,36 +52,6 @@
   async function chooseInstallDir() {
     const d = await pickDir("Dossier des applications");
     if (d) save({ installDir: d });
-  }
-
-  async function checkSelf() {
-    if (!isTauri) {
-      selfUpdate = { state: "none" };
-      return;
-    }
-    selfUpdate = { state: "checking" };
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const u = await check();
-      selfUpdate = u ? { state: "available", version: u.version } : { state: "none" };
-    } catch (e) {
-      selfUpdate = { state: "error", error: String(e) };
-    }
-  }
-
-  async function installSelf() {
-    selfUpdate = { ...selfUpdate, state: "installing" };
-    try {
-      const { check } = await import("@tauri-apps/plugin-updater");
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      const u = await check();
-      if (u) {
-        await u.downloadAndInstall();
-        await relaunch();
-      }
-    } catch (e) {
-      selfUpdate = { state: "error", error: String(e) };
-    }
   }
 
   const tokenUrl =
@@ -207,18 +177,23 @@
       <span>
         <strong>Mise à jour du launcher</strong>
         <span class="muted">
-          {#if selfUpdate.state === "checking"}Recherche…
-          {:else if selfUpdate.state === "none"}Le launcher est à jour.
-          {:else if selfUpdate.state === "available"}Version {selfUpdate.version} disponible.
-          {:else if selfUpdate.state === "installing"}Installation, le launcher va redémarrer…
-          {:else if selfUpdate.state === "error"}Vérification impossible pour l'instant (dépôt privé ?).
-          {:else}Les nouvelles versions sont signées et vérifiées avant installation.{/if}
+          {#if launcher.selfUpdate === "checking"}Recherche…
+          {:else if launcher.selfUpdate === "installing"}Installation, le launcher va redémarrer…
+          {:else if lu.version}Version {lu.version} disponible (vous avez la {o.launcherVersion}).
+          {:else if lu.error}<span title={lu.error}>Vérification impossible pour l'instant.</span>
+          {:else if lu.checkedAt}Le launcher est à jour (vérifié {relativeTime(lu.checkedAt)}).
+          {:else}Vérifiée au démarrage puis à intervalle régulier ; les versions sont signées et contrôlées avant installation.{/if}
         </span>
       </span>
-      {#if selfUpdate.state === "available"}
-        <button class="btn brand sm" onclick={installSelf}>Installer et redémarrer</button>
+      {#if lu.version}
+        <button
+          class="btn brand sm"
+          disabled={launcher.selfUpdate !== "idle" || launcher.runningOps.length > 0}
+          title={launcher.runningOps.length ? "Une opération est en cours" : ""}
+          onclick={() => launcher.installLauncher()}>Installer et redémarrer</button
+        >
       {:else}
-        <button class="btn sm" onclick={checkSelf} disabled={selfUpdate.state === "checking" || selfUpdate.state === "installing"}>Rechercher</button>
+        <button class="btn sm" onclick={() => launcher.checkLauncher()} disabled={launcher.selfUpdate !== "idle"}>Rechercher</button>
       {/if}
     </div>
     <details>
