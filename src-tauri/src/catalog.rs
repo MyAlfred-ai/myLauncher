@@ -39,6 +39,10 @@ pub struct AppDef {
     pub requirements: Vec<String>,
     #[serde(default)]
     pub dotenv_quote: DotenvQuote,
+    /// Shown in the catalog but not installable yet; lifted by editing the
+    /// catalog on `main`, without a new launcher.
+    #[serde(default)]
+    pub coming_soon: bool,
     pub targets: Targets,
 }
 

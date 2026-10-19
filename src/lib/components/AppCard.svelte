@@ -56,7 +56,7 @@
       case "failed":
         return { cls: "danger", text: "Installation échouée" };
       default:
-        return null;
+        return app.comingSoon ? { cls: "brand", text: "Bientôt disponible" } : null;
     }
   });
 
@@ -146,7 +146,7 @@
             title={stopped ? `${app.name} est arrêtée : démarrez-la d'abord` : (primary.url ?? "")}
             onclick={connect}><Icon name="external" size={15} /> Se connecter</button
           >
-        {:else if status === "available"}
+        {:else if status === "available" && !app.comingSoon}
           <button
             class="btn primary sm"
             onclick={(e) => {

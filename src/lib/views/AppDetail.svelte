@@ -55,6 +55,9 @@
         <div class="hero-actions">
           {#if installed}
             <span class="pill success"><Icon name="laptop" size={13} /> Installé sur ce poste</span>
+          {:else if app.comingSoon}
+            <span class="pill brand"><Icon name="sparkles" size={13} /> Bientôt disponible</span>
+            <span class="muted small">L'installation ouvrira prochainement.</span>
           {:else}
             <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>
               <Icon name="download" size={17} /> Installer
@@ -92,10 +95,16 @@
           </div>
         {:else}
           <div class="empty card">
-            <Icon name="download" size={28} />
-            <h3>{app.name} n'est pas encore installé</h3>
-            <p class="muted">Installez-le sur ce poste pour l'essayer ou travailler seul.</p>
-            <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>Installer {app.name}</button>
+            {#if app.comingSoon}
+              <Icon name="sparkles" size={28} />
+              <h3>{app.name} sera bientôt disponible</h3>
+              <p class="muted">En attendant, découvrez sa présentation et ses nouveautés.</p>
+            {:else}
+              <Icon name="download" size={28} />
+              <h3>{app.name} n'est pas encore installé</h3>
+              <p class="muted">Installez-le sur ce poste pour l'essayer ou travailler seul.</p>
+              <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>Installer {app.name}</button>
+            {/if}
           </div>
         {/if}
       {:else if tab === "about"}

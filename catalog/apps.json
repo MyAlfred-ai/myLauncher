@@ -106,6 +106,7 @@
     {
       "id": "mytrix",
       "name": "myTrix",
+      "comingSoon": true,
       "tagline": "Le classement documentaire intelligent",
       "description": "Réorganise et maintient vos arborescences de fichiers (dossiers locaux, Google Drive, OneDrive) selon des règles claires, avec l'aide de l'IA.",
       "icon": "mytrix.png",
@@ -153,6 +154,7 @@
     {
       "id": "mybrain",
       "name": "myBrain",
+      "comingSoon": true,
       "tagline": "Le cerveau partagé de votre équipe",
       "description": "Un wiki d'équipe en Markdown, tenu à jour tout seul à partir de vos mails, documents et pages web, interrogeable en langage naturel. Chaque fait garde sa source.",
       "icon": "mybrain.png",

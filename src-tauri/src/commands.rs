@@ -351,6 +351,9 @@ fn script_dir(dir: &str) -> String {
 pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
     let st = state(&app);
     let def = find_app(&st.catalog.read().unwrap().catalog, &req.app_id)?;
+    if def.coming_soon {
+        bail!("{} sera bientôt disponible.", def.name);
+    }
     let tdef = target_def(&def)?;
     let dir = req.dir.trim().trim_end_matches(['/', '\\']).to_string();
     check_dir(&dir)?;
