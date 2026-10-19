@@ -18,7 +18,29 @@
       "repo": { "owner": "MyAlfred-ai", "name": "myLLM", "branch": "main" },
       "version": { "source": "file", "path": "VERSION" },
       "changelog": { "source": "file", "path": "docs/NOUVEAUTES.md" },
-      "requirements": ["Docker", "5 Go de disque", "4 Go de mémoire conseillés"],
+      "requirements": ["Docker", "Une clé API d'IA (ou une IA locale)", "5 Go de disque", "4 Go de mémoire conseillés"],
+      "services": [
+        {
+          "level": "required",
+          "title": "Une clé API d'IA",
+          "detail": "MIA ne répond qu'avec au moins un fournisseur : Anthropic, Mistral ou OpenAI (Gemini, DeepSeek… aussi), ou une IA locale compatible OpenAI via Ollama / llama.cpp. La clé se saisit après l'installation dans MIA, Gestion LLMs → Clés API.",
+          "links": [
+            { "label": "Anthropic", "url": "https://console.anthropic.com/settings/keys" },
+            { "label": "Mistral", "url": "https://console.mistral.ai/api-keys" },
+            { "label": "OpenAI", "url": "https://platform.openai.com/api-keys" },
+            { "label": "Ollama", "url": "https://ollama.com/download" }
+          ]
+        },
+        {
+          "level": "optional",
+          "title": "Google Cloud ou Microsoft Entra",
+          "detail": "Améliore grandement l'expérience : connexion SSO avec les comptes de l'entreprise, connecteurs Google Drive, Gmail, Agenda et Tâches ou Outlook, OneDrive, SharePoint et Teams, synchronisation des bases de connaissances, envoi de mails. Se règle après l'installation dans l'administration de MIA.",
+          "links": [
+            { "label": "Console Google Cloud", "url": "https://console.cloud.google.com/apis/credentials" },
+            { "label": "Microsoft Entra", "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" }
+          ]
+        }
+      ],
       "dotenvQuote": "none",
       "targets": {
         "local": {
@@ -26,7 +48,8 @@
           "duration": "10 à 15 minutes",
           "notes": [
             "L'image est construite sur votre poste : comptez une dizaine de minutes la première fois.",
-            "Les clés des fournisseurs d'IA se saisissent ensuite dans MIA : Gestion LLMs → Clés API.",
+            "Clé d'IA indispensable : après l'installation, ajoutez au moins une clé (Anthropic, Mistral, OpenAI…) ou une IA locale (Ollama / llama.cpp) dans MIA, Gestion LLMs → Clés API.",
+            "Facultatif mais conseillé : un client Google Cloud ou Microsoft Entra active le SSO et les connecteurs (Drive, Gmail, Outlook, OneDrive, SharePoint, Teams…).",
             "Conservez le fichier .env du dossier d'installation : sans lui, les clés enregistrées deviennent illisibles."
           ],
           "fields": [
@@ -67,7 +90,24 @@
       "repo": { "owner": "MyAlfred-ai", "name": "myBrief", "branch": "main" },
       "version": { "source": "file", "path": "src/version.json", "jsonKey": "version" },
       "changelog": { "source": "file", "path": "NOUVEAUTES.md" },
-      "requirements": ["Docker", "Ports 80 et 443 libres", "Clé OpenAI pour l'IA"],
+      "requirements": ["Docker", "Une clé API OpenAI", "Ports 80 et 443 libres"],
+      "services": [
+        {
+          "level": "required",
+          "title": "Une clé API OpenAI",
+          "detail": "Indispensable pour la transcription, les comptes rendus et la détection des actions. Saisissez-la pendant l'installation ou plus tard dans myBrief, Administration → IA.",
+          "links": [{ "label": "Créer une clé OpenAI", "url": "https://platform.openai.com/api-keys" }]
+        },
+        {
+          "level": "optional",
+          "title": "Google Cloud ou Microsoft Entra",
+          "detail": "Améliore grandement l'expérience : connexion SSO avec les comptes Google ou Microsoft, envoi des comptes rendus par mail et dépôt sur Google Drive, OneDrive ou SharePoint depuis le compte de chacun. Se règle dans myBrief, Administration → Authentification.",
+          "links": [
+            { "label": "Console Google Cloud", "url": "https://console.cloud.google.com/apis/credentials" },
+            { "label": "Microsoft Entra", "url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" }
+          ]
+        }
+      ],
       "dotenvQuote": "none",
       "targets": {
         "local": {
@@ -77,6 +117,8 @@
           "duration": "5 minutes",
           "notes": [
             "myBrief est conçu pour un serveur avec nom de domaine : l'installation locale sert à l'essayer.",
+            "Clé API OpenAI indispensable pour la transcription et les comptes rendus (ci-dessous ou plus tard dans Administration → IA).",
+            "Facultatif mais conseillé : un client Google Cloud ou Microsoft Entra active le SSO, l'envoi par mail et le dépôt sur Drive, OneDrive ou SharePoint.",
             "Les ports 80 et 443 du poste doivent être libres.",
             "Le navigateur signalera un certificat non reconnu (certificat local) : acceptez-le pour continuer.",
             "Sur Mac Apple Silicon, les images Intel sont émulées : l'application est plus lente."
@@ -84,7 +126,7 @@
           "fields": [
             { "key": "ADMIN_SEED_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
             { "key": "ADMIN_SEED_PASSWORD", "label": "Mot de passe provisoire", "kind": "password", "required": true, "minLength": 8, "generate": "password", "help": "À changer à la première connexion." },
-            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…", "help": "Facultative : elle peut être saisie plus tard dans Administration → IA." }
+            { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…", "help": "Nécessaire pour la transcription et les comptes rendus. Vous pouvez aussi la saisir plus tard dans Administration → IA." }
           ],
           "install": [
             { "label": "Récupération du code", "run": "@sync" },

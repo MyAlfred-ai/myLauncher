@@ -37,6 +37,9 @@ pub struct AppDef {
     pub changelog: Option<ChangelogDef>,
     #[serde(default)]
     pub requirements: Vec<String>,
+    /// Accounts and keys to prepare (AI provider, Google / Microsoft…).
+    #[serde(default)]
+    pub services: Vec<ServiceNeed>,
     #[serde(default)]
     pub dotenv_quote: DotenvQuote,
     /// Shown in the catalog but not installable yet; lifted by editing the
@@ -44,6 +47,32 @@ pub struct AppDef {
     #[serde(default)]
     pub coming_soon: bool,
     pub targets: Targets,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NeedLevel {
+    /// The app does not work without it.
+    Required,
+    /// Optional, but unlocks features.
+    Optional,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceNeed {
+    pub level: NeedLevel,
+    pub title: String,
+    pub detail: String,
+    #[serde(default)]
+    pub links: Vec<Link>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Link {
+    pub label: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,6 +287,12 @@ impl Catalog {
         let slug_re = regex_lite::Regex::new(r"^[A-Za-z0-9_.-]+$").unwrap();
         let mut ids = HashSet::new();
         for app in &self.apps {
+            // A remote catalog can change these links: only web pages are opened.
+            for link in app.services.iter().flat_map(|s| &s.links) {
+                if !link.url.starts_with("https://") {
+                    bail!("Catalogue : lien non sécurisé pour {} ({}).", app.id, link.url);
+                }
+            }
             if !id_re.is_match(&app.id) || !ids.insert(app.id.clone()) {
                 bail!(
                     "Catalogue : identifiant d'application invalide ou en double « {} ».",
@@ -322,6 +357,12 @@ mod tests {
         let c = Catalog::parse(EMBEDDED).expect("embedded catalog must parse");
         let ids: Vec<_> = c.apps.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, ["mia", "mybrief", "mytrix", "mybrain"]);
+        // MIA and myBrief need an AI key; Google / Microsoft stay optional.
+        for id in ["mia", "mybrief"] {
+            let s = &c.app(id).unwrap().services;
+            assert!(s.iter().any(|n| n.level == NeedLevel::Required), "{id}: clé IA");
+            assert!(s.iter().any(|n| n.level == NeedLevel::Optional), "{id}: Google/Microsoft");
+        }
         for app in &c.apps {
             let local = app.targets.local.as_ref().expect("local target");
             assert!(

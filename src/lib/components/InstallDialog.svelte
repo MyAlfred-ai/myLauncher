@@ -7,6 +7,7 @@
   import Modal from "./Modal.svelte";
   import HostStatus from "./HostStatus.svelte";
   import ServerOffer from "./ServerOffer.svelte";
+  import ServiceNeeds from "./ServiceNeeds.svelte";
 
   let { appId }: { appId: string } = $props();
 
@@ -128,6 +129,13 @@
       <div class="callout warning">
         <Icon name="info" size={18} />
         <span>{app.name} est déjà installé ici. Utilisez « Mettre à jour » depuis sa fiche.</span>
+      </div>
+    {/if}
+
+    {#if tdef && !alreadyThere && app.services?.length}
+      <div class="prepare">
+        <span class="label">À prévoir</span>
+        <ServiceNeeds services={app.services} compact />
       </div>
     {/if}
 
@@ -287,6 +295,12 @@
   }
   .check + .callout {
     margin-top: 12px;
+  }
+  .prepare {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   .team {
     margin-top: 18px;

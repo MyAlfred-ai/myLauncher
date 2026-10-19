@@ -7,6 +7,7 @@
   import InstallationCard from "../components/InstallationCard.svelte";
   import Markdown from "../components/Markdown.svelte";
   import ServerOffer from "../components/ServerOffer.svelte";
+  import ServiceNeeds from "../components/ServiceNeeds.svelte";
 
   let { id, tab: initialTab }: { id: string; tab?: "installs" | "about" | "news" } = $props();
 
@@ -108,6 +109,12 @@
           </div>
         {/if}
       {:else if tab === "about"}
+        {#if app.services?.length}
+          <section class="prepare">
+            <h3>À prévoir</h3>
+            <ServiceNeeds services={app.services} />
+          </section>
+        {/if}
         <div class="about">
           <div class="card about-main">
             <p class="desc">{app.description}</p>
@@ -288,6 +295,15 @@
   }
   .empty h3 {
     color: var(--text);
+  }
+  .prepare {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .prepare h3 {
+    font-size: 15px;
   }
   .about {
     display: grid;

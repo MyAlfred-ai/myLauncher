@@ -46,9 +46,17 @@ export interface AppDef {
   version: { source: "releases" | "tags" | "file" | "commit"; path?: string | null };
   changelog?: { source: "file" | "releases" | "commits"; path?: string | null } | null;
   requirements: string[];
+  services?: ServiceNeed[];
   /** Shown but not installable yet. */
   comingSoon?: boolean;
   targets: { local?: TargetDef | null };
+}
+
+export interface ServiceNeed {
+  level: "required" | "optional";
+  title: string;
+  detail: string;
+  links?: { label: string; url: string }[];
 }
 
 export interface Catalog {
