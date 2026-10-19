@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.1.2] - 2026-10-19
+
+### Ajouté
+- Mise à jour automatique du launcher : recherche au démarrage puis à intervalle régulier,
+  notification et bandeau « Installer et redémarrer » (refusée pendant une opération en cours).
+- Accueil : pour chaque application installée, adresse locale, voyant d'état, boutons
+  « Se connecter » et Démarrer / Arrêter.
+- Page « Infos & contact » : offres de MyAlfred.ai pour une installation sur serveur, prise de
+  rendez-vous, formulaire et contact@myalfred.ai.
+- myTrix et myBrain affichés « Bientôt disponible » : présentation et nouveautés visibles,
+  installation pas encore ouverte.
+
+### Modifié
+- Les applications s'installent uniquement sur ce poste ; l'installation sur serveur est
+  proposée par MyAlfred.ai.
+
+### Supprimé
+- Installation sur serveur par SSH et page « Serveurs ».
+
+### Corrigé
+- Les liens (application, documentation, GitHub) ne s'ouvraient pas dans l'app de bureau.
+- Un port modifié dans le formulaire bloquait le bouton « Installer » sans message.
+- Arrêter une application coupait la base de données sans lui laisser le temps de s'arrêter.
+- MIA : port déjà pris détecté avant la construction, avec un message clair ; image Docker
+  propre à chaque installation ; accès limité à ce poste dès le premier démarrage.
+- myTrix : installation isolée d'un autre myTrix présent sur le poste.
+
 ## [0.1.1] - 2026-10-18
 
 ### Corrigé
