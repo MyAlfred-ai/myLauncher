@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.1.3] - 2026-10-19
+
+### Ajouté
+- Bloc « À prévoir » dans la présentation et dans l'assistant d'installation : ce qu'il faut
+  préparer pour chaque application, avec liens vers les consoles.
+- MIA : clé API d'IA indispensable (Anthropic, Mistral, OpenAI… ou IA locale via Ollama /
+  llama.cpp) ; Google Cloud ou Microsoft Entra facultatifs mais conseillés (SSO, connecteurs
+  Drive, Gmail, Outlook, OneDrive, SharePoint, Teams).
+- myBrief : clé API OpenAI indispensable ; Google Cloud ou Microsoft Entra facultatifs mais
+  conseillés (SSO, envoi par mail, dépôt sur Drive, OneDrive ou SharePoint).
+
 ## [0.1.2] - 2026-10-19
 
 ### Ajouté
