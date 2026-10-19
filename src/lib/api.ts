@@ -62,8 +62,14 @@ export async function openUrl(url: string) {
     window.open(url, "_blank", "noopener");
     return;
   }
-  const { openUrl } = await import("@tauri-apps/plugin-opener");
-  await openUrl(url);
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch (e) {
+    // Imported here: launcher.svelte imports this module.
+    const { launcher } = await import("./launcher.svelte");
+    launcher.toast(`Impossible d'ouvrir ${url} : ${e}`, "error");
+  }
 }
 
 export async function revealDir(path: string) {

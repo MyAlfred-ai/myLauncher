@@ -1,4 +1,4 @@
-import type { FieldDef, Installation, LatestState } from "./types";
+import type { FieldDef, Installation, LatestState, RuntimeStatus } from "./types";
 
 const rtf = new Intl.RelativeTimeFormat("fr", { numeric: "auto" });
 
@@ -75,6 +75,39 @@ export function latestLabel(l: LatestState | undefined): string {
   if (!l) return "Version inconnue";
   if (l.error) return "Version indisponible";
   return displayVersion(l.latest?.version);
+}
+
+/** Label and colour of the containers' state, the same on every screen. */
+export function runtimeInfo(s: RuntimeStatus | null | undefined): { cls: string; text: string } {
+  switch (s?.state) {
+    case "running":
+      return { cls: "success", text: "En marche" };
+    case "partial":
+      return { cls: "warning", text: "Démarrage partiel" };
+    case "stopped":
+      return { cls: "", text: "Arrêtée" };
+    case "absent":
+      return { cls: "", text: "Conteneurs absents" };
+    case "unknown":
+      return { cls: "warning", text: "État inconnu" };
+    default:
+      return { cls: "", text: "—" };
+  }
+}
+
+/** True when the next useful action is "Démarrer" rather than "Arrêter". */
+export function isStopped(s: RuntimeStatus | null | undefined): boolean {
+  return s?.state === "stopped" || s?.state === "absent";
+}
+
+/** "localhost:8081", "brain.myalfred.ai": where the application answers. */
+export function addressLabel(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.host + u.pathname.replace(/\/$/, "");
+  } catch {
+    return url;
+  }
 }
 
 export const actionLabels: Record<string, string> = {

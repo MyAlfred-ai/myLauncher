@@ -99,7 +99,7 @@
           </span>
         </div>
         {#if inst?.url}
-          <button class="btn" onclick={() => openUrl(inst.url!)}><Icon name="external" size={16} /> Ouvrir {app.name}</button>
+          <button class="btn" onclick={() => openUrl(inst.url!)}><Icon name="external" size={16} /> Se connecter à {app.name}</button>
         {/if}
       </div>
     {:else if op.status === "failed"}

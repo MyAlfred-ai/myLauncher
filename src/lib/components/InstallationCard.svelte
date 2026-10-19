@@ -2,15 +2,13 @@
   import { onMount } from "svelte";
   import { launcher } from "../launcher.svelte";
   import { api, isTauri, openUrl, revealDir } from "../api";
-  import { displayVersion, relativeTime } from "../format";
-  import type { Installation, RuntimeStatus } from "../types";
+  import { displayVersion, isStopped, relativeTime, runtimeInfo } from "../format";
+  import type { Installation } from "../types";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
 
   let { inst }: { inst: Installation } = $props();
 
-  let status = $state<RuntimeStatus | null>(null);
-  let loadingStatus = $state(false);
   let menuOpen = $state(false);
   let confirm = $state<null | "remove" | "forget">(null);
   let logs = $state<string | null>(null);
@@ -19,20 +17,15 @@
   const op = $derived(inst.busyOp ? launcher.ops[inst.busyOp] : undefined);
   const app = $derived(launcher.app(inst.appId));
   const progress = $derived(op ? Math.round((op.currentStep / Math.max(1, op.steps.length)) * 100) : 0);
+  const status = $derived(launcher.runtime[inst.id]?.status ?? null);
+  const loadingStatus = $derived(!!launcher.runtime[inst.id]?.loading);
+  const stopped = $derived(isStopped(status));
 
-  async function refreshStatus() {
-    if (inst.state !== "ready") return;
-    loadingStatus = true;
-    try {
-      status = await api.status(inst.id);
-    } catch (e) {
-      status = { state: "unknown", services: [], error: String(e) };
-    } finally {
-      loadingStatus = false;
-    }
+  function refreshStatus(force = true) {
+    if (inst.state === "ready") launcher.refreshStatus(inst.id, force);
   }
 
-  onMount(refreshStatus);
+  onMount(() => refreshStatus(false));
 
   // Refresh the container state once an operation on this install ends.
   let wasBusy = false;
@@ -47,20 +40,7 @@
     if (inst.state === "failed") return { cls: "danger", text: "Installation échouée" };
     if (op) return { cls: "brand", text: "En cours" };
     if (loadingStatus && !status) return { cls: "", text: "…" };
-    switch (status?.state) {
-      case "running":
-        return { cls: "success", text: "En marche" };
-      case "partial":
-        return { cls: "warning", text: "Démarrage partiel" };
-      case "stopped":
-        return { cls: "", text: "Arrêtée" };
-      case "absent":
-        return { cls: "", text: "Conteneurs absents" };
-      case "unknown":
-        return { cls: "warning", text: "État inconnu" };
-      default:
-        return { cls: "", text: "—" };
-    }
+    return runtimeInfo(status);
   });
 
   async function showLogs() {
@@ -151,16 +131,24 @@
         </button>
       {/if}
       {#if inst.url}
-        <button class="btn sm" class:primary={!inst.updateAvailable} onclick={() => openUrl(inst.url!)}>
-          <Icon name="external" size={15} /> Ouvrir
+        <button
+          class="btn sm"
+          class:primary={!inst.updateAvailable}
+          disabled={stopped}
+          title={stopped ? `${app?.name} est arrêtée : démarrez-la d'abord` : inst.url}
+          onclick={() => openUrl(inst.url!)}
+        >
+          <Icon name="external" size={15} /> Se connecter
         </button>
       {/if}
-      {#if status?.state === "stopped" || status?.state === "absent"}
-        <button class="btn sm" disabled={!!op} onclick={() => launcher.run(inst.id, "start", false)}>
+      {#if !status}
+        <button class="btn sm" disabled><Icon name="loader" size={14} class="spin" /> État…</button>
+      {:else if stopped}
+        <button class="btn sm start" disabled={!!op} onclick={() => launcher.run(inst.id, "start", false)}>
           <Icon name="play" size={13} /> Démarrer
         </button>
       {:else}
-        <button class="btn sm" disabled={!!op} onclick={() => launcher.run(inst.id, "stop", false)}>
+        <button class="btn sm halt" disabled={!!op} onclick={() => launcher.run(inst.id, "stop", false)}>
           <Icon name="stop" size={14} /> Arrêter
         </button>
       {/if}
@@ -183,7 +171,7 @@
           {#if inst.state === "ready"}
             <button role="menuitem" disabled={!!op} onclick={() => launcher.run(inst.id, "restart", false)}><Icon name="restart" size={16} /> Redémarrer</button>
             <button role="menuitem" onclick={showLogs}><Icon name="terminal" size={16} /> Journaux de l'application</button>
-            <button role="menuitem" onclick={refreshStatus}><Icon name="refresh" size={16} /> Actualiser l'état</button>
+            <button role="menuitem" onclick={() => refreshStatus()}><Icon name="refresh" size={16} /> Actualiser l'état</button>
           {/if}
           {#if inst.target === "local" && isTauri}
             <button role="menuitem" onclick={() => revealDir(inst.dir)}><Icon name="folder" size={16} /> Ouvrir le dossier</button>

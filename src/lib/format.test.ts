@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { appStatus, displayVersion, initialValues, isActive, relativeTime, validateField } from "./format";
+import {
+  addressLabel,
+  appStatus,
+  displayVersion,
+  initialValues,
+  isActive,
+  isStopped,
+  relativeTime,
+  runtimeInfo,
+  validateField,
+} from "./format";
 import type { FieldDef, Installation } from "./types";
 
 describe("displayVersion", () => {
@@ -59,6 +69,28 @@ describe("form fields", () => {
     const typed = { PORT: 8081 } as unknown as Record<string, string>;
     expect(validateField(port, typed)).toBeNull();
     expect(validateField(port, { PORT: "80a" })).toBe("Nombre attendu");
+  });
+});
+
+describe("runtime", () => {
+  const st = (state: "running" | "partial" | "stopped" | "absent" | "unknown") => ({ state, services: [], error: null });
+  it("shows where the application answers", () => {
+    expect(addressLabel("http://localhost:8081")).toBe("localhost:8081");
+    expect(addressLabel("https://brain.myalfred.ai/")).toBe("brain.myalfred.ai");
+    expect(addressLabel("https://intra.fr/mia/")).toBe("intra.fr/mia");
+    expect(addressLabel("pas une url")).toBe("pas une url");
+  });
+  it("offers to start only what is stopped", () => {
+    expect(isStopped(st("stopped"))).toBe(true);
+    expect(isStopped(st("absent"))).toBe(true);
+    expect(isStopped(st("running"))).toBe(false);
+    expect(isStopped(st("unknown"))).toBe(false);
+    expect(isStopped(null)).toBe(false);
+  });
+  it("labels states the same everywhere", () => {
+    expect(runtimeInfo(st("running"))).toEqual({ cls: "success", text: "En marche" });
+    expect(runtimeInfo(st("stopped")).text).toBe("Arrêtée");
+    expect(runtimeInfo(undefined).text).toBe("—");
   });
 });
 

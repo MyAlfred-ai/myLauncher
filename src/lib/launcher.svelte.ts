@@ -1,5 +1,5 @@
 import { api, on } from "./api";
-import type { AppDef, Installation, LogLine, OpInfo, Overview } from "./types";
+import type { AppDef, Installation, LogLine, OpInfo, Overview, RuntimeStatus } from "./types";
 
 export type View =
   | { name: "library" }
@@ -15,7 +15,15 @@ export interface Toast {
   text: string;
 }
 
+export interface Runtime {
+  status: RuntimeStatus | null;
+  loading: boolean;
+  at: number;
+}
+
 const MAX_LOG_LINES = 4000;
+/** A reading of the containers younger than this is reused. */
+const STATUS_TTL = 15_000;
 
 /** Global state of the interface. */
 class Launcher {
@@ -28,8 +36,11 @@ class Launcher {
   checking = $state(false);
   /** App whose install dialog is open. */
   installing = $state<{ appId: string; target?: string } | null>(null);
+  /** Containers' state per installation, shared by the library and the app page. */
+  runtime = $state<Record<string, Runtime>>({});
 
   #toastId = 0;
+  #statusAgain = new Set<string>();
   #refreshing: Promise<void> | null = null;
   #again = false;
 
@@ -112,6 +123,26 @@ class Launcher {
     } catch {
       /* log may be gone after a restart */
     }
+  }
+
+  /** Reads the containers' state; a recent reading is reused unless `force`. */
+  async refreshStatus(installationId: string, force = false) {
+    const cur = this.runtime[installationId];
+    if (cur?.loading) {
+      if (force) this.#statusAgain.add(installationId);
+      return;
+    }
+    if (!force && cur?.status && Date.now() - cur.at < STATUS_TTL) return;
+    this.runtime[installationId] = { status: cur?.status ?? null, loading: true, at: cur?.at ?? 0 };
+    let status: RuntimeStatus;
+    try {
+      status = await api.status(installationId);
+    } catch (e) {
+      status = { state: "unknown", services: [], error: String(e) };
+    }
+    this.runtime[installationId] = { status, loading: false, at: Date.now() };
+    // An operation ended while this reading was under way: read again.
+    if (this.#statusAgain.delete(installationId)) await this.refreshStatus(installationId, true);
   }
 
   async checkUpdates() {

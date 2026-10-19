@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { appIcon, launcher } from "../launcher.svelte";
-  import { appStatus, displayVersion } from "../format";
+  import { actionLabels, addressLabel, appStatus, displayVersion, isStopped, runtimeInfo } from "../format";
   import { openUrl } from "../api";
   import type { AppDef } from "../types";
   import Icon from "./Icon.svelte";
@@ -10,8 +11,40 @@
   const installs = $derived(launcher.installsFor(app.id));
   const status = $derived(appStatus(installs));
   const latest = $derived(launcher.latest(app.id));
-  const ready = $derived(installs.find((i) => i.state === "ready" && i.url));
   const toUpdate = $derived(installs.filter((i) => i.updateAvailable && !i.busyOp));
+  // The installation driven from the card: this computer first.
+  const primary = $derived(
+    installs.filter((i) => i.state === "ready").sort((a, b) => Number(b.target === "local") - Number(a.target === "local"))[0],
+  );
+  const rt = $derived(primary ? launcher.runtime[primary.id] : undefined);
+  const op = $derived(primary?.busyOp ? launcher.ops[primary.busyOp] : undefined);
+  const stopped = $derived(isStopped(rt?.status));
+  const led = $derived.by(() => {
+    if (op) return "work";
+    switch (rt?.status?.state) {
+      case "running":
+        return "on";
+      case "partial":
+      case "unknown":
+        return "warn";
+      default:
+        return "off";
+    }
+  });
+
+  $effect(() => {
+    const id = primary?.id;
+    if (id) untrack(() => launcher.refreshStatus(id));
+  });
+
+  // Read the containers again once an operation on this installation ends.
+  let wasBusy = false;
+  $effect(() => {
+    const id = primary?.id;
+    const busy = !!primary?.busyOp;
+    if (id && wasBusy && !busy) untrack(() => launcher.refreshStatus(id, true));
+    wasBusy = busy;
+  });
 
   const statusInfo = $derived.by(() => {
     switch (status) {
@@ -20,7 +53,8 @@
       case "update":
         return { cls: "warning", text: "Mise à jour disponible" };
       case "installed":
-        return { cls: "success", text: installs.length > 1 ? `${installs.length} installations` : "Installé" };
+        if (installs.length > 1) return { cls: "success", text: `${installs.length} installations` };
+        return rt?.status ? runtimeInfo(rt.status) : { cls: "success", text: "Installé" };
       case "failed":
         return { cls: "danger", text: "Installation échouée" };
       default:
@@ -30,6 +64,16 @@
 
   function open() {
     launcher.go({ name: "app", id: app.id });
+  }
+
+  function connect(e: MouseEvent) {
+    e.stopPropagation();
+    if (primary?.url) openUrl(primary.url);
+  }
+
+  function toggle(e: MouseEvent) {
+    e.stopPropagation();
+    if (primary) launcher.run(primary.id, stopped ? "start" : "stop", false);
   }
 
   async function update(e: MouseEvent) {
@@ -59,35 +103,69 @@
       {/if}
     </div>
     <p class="tagline">{app.tagline}</p>
-    <div class="actions">
-      {#if status === "update"}
-        <button class="btn brand sm" onclick={update}><Icon name="up" size={16} /> Mettre à jour</button>
+    <div class="controls">
+      {#if primary}
+        <div class="endpoint">
+          <span class="led {led}" title={runtimeInfo(rt?.status).text}></span>
+          {#if primary.url && !stopped}
+            <button class="address mono" title="Se connecter à {primary.url}" onclick={connect}>{addressLabel(primary.url)}</button>
+          {:else if primary.url}
+            <span class="address mono">{addressLabel(primary.url)}</span>
+          {:else}
+            <span class="address">{primary.targetLabel}</span>
+          {/if}
+          {#if op}
+            <span class="busy" title="{actionLabels[op.action] ?? 'Opération'} en cours">
+              <Icon name="loader" size={13} class="spin" />
+              <span class="busy-label">{actionLabels[op.action] ?? "Opération"}…</span>
+            </span>
+          {:else if !rt?.status}
+            <span class="busy" title="Lecture de l'état…"><Icon name="loader" size={13} class="spin" /></span>
+          {:else}
+            <button
+              class="btn sm power"
+              class:start={stopped}
+              class:halt={!stopped}
+              aria-label="{stopped ? 'Démarrer' : 'Arrêter'} {app.name}"
+              title="{stopped ? 'Démarrer' : 'Arrêter'} {app.name}"
+              onclick={toggle}
+            >
+              <Icon name={stopped ? "play" : "stop"} size={11} />
+              <span class="power-label">{stopped ? "Démarrer" : "Arrêter"}</span>
+            </button>
+          {/if}
+        </div>
       {/if}
-      {#if ready}
-        <button
-          class="btn sm"
-          class:primary={status !== "update"}
-          onclick={(e) => {
-            e.stopPropagation();
-            openUrl(ready.url!);
-          }}><Icon name="external" size={15} /> Ouvrir</button
-        >
-      {:else if status === "available"}
-        <button
-          class="btn primary sm"
-          onclick={(e) => {
-            e.stopPropagation();
-            launcher.installing = { appId: app.id };
-          }}><Icon name="download" size={16} /> Installer</button
-        >
-      {/if}
-      <span class="more">Détails <Icon name="chevron" size={15} /></span>
+      <div class="actions" class:stacked={status === "update" && !!primary}>
+        {#if status === "update"}
+          <button class="btn brand sm" onclick={update}><Icon name="up" size={16} /> Mettre à jour</button>
+        {/if}
+        {#if primary}
+          <button
+            class="btn sm"
+            class:primary={status !== "update"}
+            disabled={!primary.url || stopped}
+            title={stopped ? `${app.name} est arrêtée : démarrez-la d'abord` : (primary.url ?? "")}
+            onclick={connect}><Icon name="external" size={15} /> Se connecter</button
+          >
+        {:else if status === "available"}
+          <button
+            class="btn primary sm"
+            onclick={(e) => {
+              e.stopPropagation();
+              launcher.installing = { appId: app.id };
+            }}><Icon name="download" size={16} /> Installer</button
+          >
+        {/if}
+        <span class="more">Détails <Icon name="chevron" size={15} /></span>
+      </div>
     </div>
   </div>
 </article>
 
 <style>
   .app-card {
+    container-type: inline-size;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -177,15 +255,126 @@
     font-size: 14px;
     min-height: 2.9em;
   }
+  /* Pinned to the bottom: cards of a row line up whatever their text. */
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 8px;
+  }
+  .endpoint {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 40px;
+    padding: 5px 5px 5px 12px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .led {
+    --ring: var(--success);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--border-strong);
+    flex: none;
+  }
+  .led.on {
+    background: var(--success);
+    animation: beat 2.4s ease-out infinite;
+  }
+  .led.warn {
+    background: var(--warning);
+  }
+  .led.work {
+    --ring: var(--primary);
+    background: var(--primary);
+    animation: beat 1.2s ease-out infinite;
+  }
+  @keyframes beat {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--ring) 50%, transparent);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 5px transparent;
+    }
+  }
+  .address {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font-size: 12.5px;
+    color: var(--text-2);
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  button.address {
+    cursor: pointer;
+  }
+  button.address:hover {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .power {
+    height: 30px;
+    padding: 0 11px;
+    gap: 6px;
+    font-size: 12.5px;
+    border-radius: 9px;
+    flex: none;
+  }
+  .power.halt {
+    color: var(--text-2);
+  }
+  .busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12.5px;
+    color: var(--primary);
+    flex: none;
+  }
   .actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    margin-top: 8px;
   }
   .actions .btn {
     position: relative;
     z-index: 2;
+  }
+  /* Narrow card: the address matters more than the button's words. */
+  @container (max-width: 300px) {
+    .power {
+      width: 30px;
+      padding: 0;
+    }
+    .power-label,
+    .busy-label {
+      display: none;
+    }
+    .busy {
+      width: 30px;
+      justify-content: center;
+      padding: 0;
+    }
+  }
+  /* Update and connect side by side do not fit a narrow card. */
+  .actions.stacked .btn.brand {
+    flex: 1 1 100%;
   }
   .more {
     margin-left: auto;

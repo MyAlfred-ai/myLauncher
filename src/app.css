@@ -262,6 +262,20 @@ textarea,
   color: #fff;
   border-color: transparent;
 }
+/* Démarrer / Arrêter: the same colours on every screen. */
+.btn.start {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+.btn.start:hover:not(:disabled) {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.btn.halt:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+  background: var(--danger-soft);
+}
 .btn.sm {
   height: 32px;
   padding: 0 12px;

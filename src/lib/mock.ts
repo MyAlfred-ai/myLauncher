@@ -67,6 +67,8 @@ let installations: Installation[] = [
     busyOp: null,
   },
 ];
+// Containers' state of the demo installations, changed by start/stop.
+const running: Record<string, boolean> = { "inst-mia": true, "inst-brain": false };
 const ops: OpInfo[] = [];
 const logs = new Map<string, LogLine[]>();
 let seq = 0;
@@ -103,7 +105,7 @@ function simulate(installationId: string, appId: string, action: OpInfo["action"
   const app = catalog.apps.find((a) => a.id === appId)!;
   const inst = installations.find((i) => i.id === installationId);
   const tdef = inst?.target === "local" || !inst ? app.targets.local! : app.targets.server!;
-  const steps = ["Vérification des prérequis", ...(action === "update" ? tdef.update : action === "install" ? tdef.install : [{ label: "Démarrage", run: "" }]).map((s) => s.label)];
+  const steps = ["Vérification des prérequis", ...(action === "update" ? tdef.update : action === "install" ? tdef.install : [{ label: action === "stop" ? "Arrêt" : action === "restart" ? "Redémarrage" : "Démarrage", run: "" }]).map((s) => s.label)];
   const op: OpInfo = {
     id: `op-${Math.random().toString(36).slice(2, 9)}`,
     installationId,
@@ -158,6 +160,7 @@ function simulate(installationId: string, appId: string, action: OpInfo["action"
         if (action === "remove") installations = installations.filter((x) => x.id !== installationId);
         else {
           target.state = "ready";
+          running[installationId] = action !== "stop";
           if (action === "update" || action === "install") {
             target.version = latest()[appId as "mia"].latest.version;
             target.updateAvailable = false;
@@ -249,16 +252,19 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       emit("overview-changed", null);
       return undefined as T;
     }
-    case "installation_status":
+    case "installation_status": {
+      const on = running[a.installationId] ?? true;
+      const state = on ? "running" : "exited";
       return {
-        state: a.installationId === "inst-mia" ? "running" : "running",
+        state: on ? "running" : "stopped",
         services: [
-          { name: "app", state: "running", health: "healthy" },
-          { name: "db", state: "running", health: "healthy" },
-          { name: "worker", state: "running", health: "" },
+          { name: "app", state, health: on ? "healthy" : "" },
+          { name: "db", state, health: on ? "healthy" : "" },
+          { name: "worker", state, health: "" },
         ],
         error: null,
       } as T;
+    }
     case "installation_logs":
       return "app-1  | [2026-10-18 10:02:11] Listening on :80\nworker-1  | job queue ready\n" as T;
     case "get_op_log":
