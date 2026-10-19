@@ -6,14 +6,14 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::catalog::{AppDef, Catalog, FieldKind, TargetDef, TargetKind, VersionSource};
+use crate::catalog::{AppDef, Catalog, FieldKind, TargetDef, VersionSource};
 use crate::error::{bail, Error, Result};
-use crate::exec::{self, Target};
+use crate::exec;
 use crate::github::Gh;
 use crate::ops::{self, LogLine, OpInfo, OpRequest};
 use crate::script::{self, Action, Plan};
 use crate::state::{now, state, LatestState};
-use crate::store::{check_dir, InstallState, Installation, Server, Settings};
+use crate::store::{check_dir, InstallState, Installation, Settings};
 use crate::{secrets, updates, version};
 
 #[derive(Serialize)]
@@ -21,7 +21,6 @@ use crate::{secrets, updates, version};
 pub struct InstallationView {
     #[serde(flatten)]
     pub inst: Installation,
-    pub target_label: String,
     pub update_available: bool,
     pub busy_op: Option<String>,
 }
@@ -34,26 +33,12 @@ pub struct Overview {
     pub catalog_fetched_at: Option<String>,
     pub latest: HashMap<String, LatestState>,
     pub installations: Vec<InstallationView>,
-    pub servers: Vec<Server>,
     pub ops: Vec<OpInfo>,
     pub settings: Settings,
     pub has_token: bool,
     pub last_check: Option<String>,
     pub platform: String,
     pub launcher_version: String,
-}
-
-fn target_label(app: &AppHandle, target: &str) -> String {
-    if target == "local" {
-        return "Ce poste".into();
-    }
-    state(app)
-        .store
-        .read()
-        .unwrap()
-        .server(target)
-        .map(|s| s.name.clone())
-        .unwrap_or_else(|| "Serveur supprimé".into())
 }
 
 #[tauri::command]
@@ -85,14 +70,6 @@ pub fn get_overview(app: AppHandle) -> Overview {
                     });
             InstallationView {
                 inst: i.clone(),
-                target_label: if i.target == "local" {
-                    "Ce poste".into()
-                } else {
-                    store
-                        .server(&i.target)
-                        .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "Serveur supprimé".into())
-                },
                 update_available,
                 busy_op: st.ops.running_for(&i.id),
             }
@@ -106,7 +83,6 @@ pub fn get_overview(app: AppHandle) -> Overview {
         catalog_fetched_at: catalog.fetched_at.clone(),
         latest,
         installations,
-        servers: store.servers.clone(),
         ops: st.ops.list(),
         settings,
         has_token: st.token().is_some(),
@@ -221,20 +197,9 @@ pub struct HostCheck {
     pub error: Option<String>,
 }
 
-fn target_of(app: &AppHandle, target: &str) -> Result<Target> {
-    if target == "local" {
-        return Ok(Target::Local);
-    }
-    match state(app).store.read().unwrap().server(target) {
-        Some(s) => Ok(Target::Ssh(s.clone())),
-        None => bail!("Serveur introuvable."),
-    }
-}
-
 #[tauri::command]
-pub async fn check_host(app: AppHandle, target: String) -> Result<HostCheck> {
-    let t = target_of(&app, &target)?;
-    let cap = match exec::run_capture(&t, script::HOST_CHECK, Duration::from_secs(30)).await {
+pub async fn check_host() -> Result<HostCheck> {
+    let cap = match exec::run_capture(script::HOST_CHECK, Duration::from_secs(30)).await {
         Ok(c) => c,
         Err(e) => {
             return Ok(HostCheck {
@@ -244,12 +209,8 @@ pub async fn check_host(app: AppHandle, target: String) -> Result<HostCheck> {
         }
     };
     if cap.code != 0 {
-        let error = match t {
-            Target::Ssh(_) => exec::ssh_error(&cap.stderr),
-            Target::Local => format!("Vérification impossible : {}", cap.stderr.trim()),
-        };
         return Ok(HostCheck {
-            error: Some(error),
+            error: Some(format!("Vérification impossible : {}", cap.stderr.trim())),
             ..Default::default()
         });
     }
@@ -266,52 +227,6 @@ pub async fn check_host(app: AppHandle, target: String) -> Result<HostCheck> {
     })
 }
 
-#[tauri::command]
-pub fn save_server(app: AppHandle, mut server: Server) -> Result<Server> {
-    server.name = server.name.trim().to_string();
-    server.host = server.host.trim().to_string();
-    server.user = server.user.trim().to_string();
-    server.base_dir = server.base_dir.trim().trim_end_matches('/').to_string();
-    if server.base_dir.is_empty() {
-        server.base_dir = "~/myalfred".into();
-    }
-    server.identity_file = server
-        .identity_file
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    server.validate()?;
-    let st = state(&app);
-    {
-        let mut store = st.store.write().unwrap();
-        if server.id.is_empty() {
-            server.id = format!("srv-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-            store.servers.push(server.clone());
-        } else if let Some(s) = store.servers.iter_mut().find(|s| s.id == server.id) {
-            *s = server.clone();
-        } else {
-            bail!("Serveur introuvable.");
-        }
-    }
-    st.save_store()?;
-    let _ = app.emit("overview-changed", ());
-    Ok(server)
-}
-
-#[tauri::command]
-pub fn delete_server(app: AppHandle, id: String) -> Result<()> {
-    let st = state(&app);
-    {
-        let mut store = st.store.write().unwrap();
-        if store.installations.iter().any(|i| i.target == id) {
-            bail!("Des applications sont installées sur ce serveur : retirez-les d'abord.");
-        }
-        store.servers.retain(|s| s.id != id);
-    }
-    st.save_store()?;
-    let _ = app.emit("overview-changed", ());
-    Ok(())
-}
-
 fn find_app(catalog: &Catalog, id: &str) -> Result<AppDef> {
     catalog
         .app(id)
@@ -319,38 +234,20 @@ fn find_app(catalog: &Catalog, id: &str) -> Result<AppDef> {
         .ok_or_else(|| Error::msg(format!("Application inconnue : {id}")))
 }
 
-fn target_def(app: &AppDef, target: &str) -> Result<TargetDef> {
-    let kind = if target == "local" {
-        TargetKind::Local
-    } else {
-        TargetKind::Server
-    };
-    app.targets.get(kind).cloned().ok_or_else(|| {
-        Error::msg(match kind {
-            TargetKind::Local => format!("{} ne s'installe pas sur un poste.", app.name),
-            TargetKind::Server => format!("{} ne s'installe pas sur un serveur.", app.name),
-        })
-    })
+fn target_def(app: &AppDef) -> Result<TargetDef> {
+    app.targets
+        .local
+        .clone()
+        .ok_or_else(|| Error::msg(format!("{} ne s'installe pas sur un poste.", app.name)))
 }
 
 #[tauri::command]
-pub fn default_install_dir(app: AppHandle, app_id: String, target: String) -> Result<String> {
-    let st = state(&app);
-    if target == "local" {
-        let base = st.settings.read().unwrap().install_dir.clone();
-        let sep = if cfg!(windows) { "\\" } else { "/" };
-        return Ok(format!(
-            "{}{sep}{app_id}",
-            base.trim_end_matches(['/', '\\'])
-        ));
-    }
-    let store = st.store.read().unwrap();
-    let server = store
-        .server(&target)
-        .ok_or_else(|| Error::msg("Serveur introuvable."))?;
+pub fn default_install_dir(app: AppHandle, app_id: String) -> Result<String> {
+    let base = state(&app).settings.read().unwrap().install_dir.clone();
+    let sep = if cfg!(windows) { "\\" } else { "/" };
     Ok(format!(
-        "{}/{app_id}",
-        server.base_dir.trim_end_matches('/')
+        "{}{sep}{app_id}",
+        base.trim_end_matches(['/', '\\'])
     ))
 }
 
@@ -358,7 +255,6 @@ pub fn default_install_dir(app: AppHandle, app_id: String, target: String) -> Re
 #[serde(rename_all = "camelCase")]
 pub struct InstallRequest {
     pub app_id: String,
-    pub target: String,
     pub dir: String,
     pub values: BTreeMap<String, String>,
 }
@@ -412,13 +308,8 @@ fn validate_values(def: &AppDef, t: &TargetDef, values: &BTreeMap<String, String
     Ok(())
 }
 
-fn render_url(
-    template: &str,
-    t: &TargetDef,
-    values: &BTreeMap<String, String>,
-    host: &str,
-) -> String {
-    let mut url = template.replace("{{HOST}}", host);
+fn render_url(template: &str, t: &TargetDef, values: &BTreeMap<String, String>) -> String {
+    let mut url = template.to_string();
     for f in &t.fields {
         let v = values
             .get(&f.key)
@@ -432,8 +323,8 @@ fn render_url(
 }
 
 /// Windows paths are passed to Git Bash with forward slashes.
-fn script_dir(dir: &str, target: &Target) -> String {
-    if target.is_windows_local() {
+fn script_dir(dir: &str) -> String {
+    if cfg!(windows) {
         dir.replace('\\', "/")
     } else {
         dir.to_string()
@@ -444,8 +335,7 @@ fn script_dir(dir: &str, target: &Target) -> String {
 pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
     let st = state(&app);
     let def = find_app(&st.catalog.read().unwrap().catalog, &req.app_id)?;
-    let tdef = target_def(&def, &req.target)?;
-    let target = target_of(&app, &req.target)?;
+    let tdef = target_def(&def)?;
     let dir = req.dir.trim().trim_end_matches(['/', '\\']).to_string();
     check_dir(&dir)?;
     let values: BTreeMap<String, String> = req
@@ -455,26 +345,19 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
         .collect();
     validate_values(&def, &tdef, &values)?;
 
-    let host = match &target {
-        Target::Ssh(s) => s.host.clone(),
-        Target::Local => "localhost".into(),
-    };
     let existing_id = {
         let store = st.store.read().unwrap();
-        if let Some(i) = store.installations.iter().find(|i| {
-            i.app_id == def.id && i.target == req.target && i.state != InstallState::Failed
-        }) {
-            bail!(
-                "{} est déjà installé sur {} ({}).",
-                def.name,
-                target_label(&app, &req.target),
-                i.dir
-            );
+        if let Some(i) = store
+            .installations
+            .iter()
+            .find(|i| i.app_id == def.id && i.state != InstallState::Failed)
+        {
+            bail!("{} est déjà installé sur ce poste ({}).", def.name, i.dir);
         }
         if store
             .installations
             .iter()
-            .any(|i| i.target == req.target && i.dir == dir && i.app_id != def.id)
+            .any(|i| i.dir == dir && i.app_id != def.id)
         {
             bail!("Ce dossier est déjà utilisé par une autre application.");
         }
@@ -482,9 +365,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
         store
             .installations
             .iter()
-            .find(|i| {
-                i.app_id == def.id && i.target == req.target && i.state == InstallState::Failed
-            })
+            .find(|i| i.app_id == def.id && i.state == InstallState::Failed)
             .map(|i| i.id.clone())
     };
 
@@ -495,7 +376,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
         .filter(|f| !f.kind.is_secret())
         .filter_map(|f| values.get(&f.key).map(|v| (f.key.clone(), v.clone())))
         .collect();
-    let url = render_url(&tdef.url, &tdef, &values, &host);
+    let url = render_url(&tdef.url, &tdef, &values);
     let id = existing_id
         .unwrap_or_else(|| format!("inst-{}", &uuid::Uuid::new_v4().simple().to_string()[..10]));
     {
@@ -504,7 +385,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
         store.installations.push(Installation {
             id: id.clone(),
             app_id: def.id.clone(),
-            target: req.target.clone(),
+            target: "local".into(),
             dir: dir.clone(),
             values: stored,
             version: None,
@@ -521,7 +402,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
 
     let git_ref = latest_ref(&app, &def);
     let token = st.token();
-    let sdir = script_dir(&dir, &target);
+    let sdir = script_dir(&dir);
     let script = script::build(&Plan {
         app: &def,
         target: &tdef,
@@ -530,7 +411,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
         values: &values,
         git_ref: (&git_ref.0, &git_ref.1),
         token: token.as_deref(),
-        windows: target.is_windows_local(),
+        windows: cfg!(windows),
     });
     let op = ops::spawn(
         &app,
@@ -538,8 +419,6 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
             installation_id: id,
             app_id: def.id.clone(),
             action: Action::Install,
-            target,
-            target_label: target_label(&app, &req.target),
             script,
             steps: script::step_labels(&tdef, Action::Install),
         },
@@ -568,14 +447,13 @@ pub fn start_action(app: &AppHandle, installation_id: &str, action: Action) -> R
         .cloned()
         .ok_or_else(|| Error::msg("Installation introuvable."))?;
     let def = find_app(&st.catalog.read().unwrap().catalog, &inst.app_id)?;
-    let tdef = target_def(&def, &inst.target)?;
-    let target = target_of(app, &inst.target)?;
+    let tdef = target_def(&def)?;
     if action == Action::Update && inst.state != InstallState::Ready {
         bail!("Terminez d'abord l'installation de {}.", def.name);
     }
     let git_ref = latest_ref(app, &def);
     let token = st.token();
-    let sdir = script_dir(&inst.dir, &target);
+    let sdir = script_dir(&inst.dir);
     let script = script::build(&Plan {
         app: &def,
         target: &tdef,
@@ -584,7 +462,7 @@ pub fn start_action(app: &AppHandle, installation_id: &str, action: Action) -> R
         values: &inst.values,
         git_ref: (&git_ref.0, &git_ref.1),
         token: token.as_deref(),
-        windows: target.is_windows_local(),
+        windows: cfg!(windows),
     });
     ops::spawn(
         app,
@@ -592,8 +470,6 @@ pub fn start_action(app: &AppHandle, installation_id: &str, action: Action) -> R
             installation_id: inst.id.clone(),
             app_id: def.id.clone(),
             action,
-            target,
-            target_label: target_label(app, &inst.target),
             script,
             steps: script::step_labels(&tdef, action),
         },
@@ -712,13 +588,8 @@ pub fn summarize(services: &[ServiceStatus]) -> String {
 #[tauri::command]
 pub async fn installation_status(app: AppHandle, installation_id: String) -> Result<RuntimeStatus> {
     let (inst, workdir) = installation_with_workdir(&app, &installation_id)?;
-    let target = target_of(&app, &inst.target)?;
-    let script = script::status_script(
-        &script_dir(&inst.dir, &target),
-        workdir.as_deref(),
-        target.is_windows_local(),
-    );
-    let cap = match exec::run_capture(&target, &script, Duration::from_secs(30)).await {
+    let script = script::status_script(&script_dir(&inst.dir), workdir.as_deref(), cfg!(windows));
+    let cap = match exec::run_capture(&script, Duration::from_secs(30)).await {
         Ok(c) => c,
         Err(e) => {
             return Ok(RuntimeStatus {
@@ -729,9 +600,8 @@ pub async fn installation_status(app: AppHandle, installation_id: String) -> Res
         }
     };
     if cap.code != 0 {
-        let error = match (&target, cap.code) {
-            (Target::Ssh(_), 255) => exec::ssh_error(&cap.stderr),
-            (_, 3) => "Dossier d'installation introuvable.".into(),
+        let error = match cap.code {
+            3 => "Dossier d'installation introuvable.".into(),
             _ => cap
                 .stderr
                 .lines()
@@ -756,13 +626,8 @@ pub async fn installation_status(app: AppHandle, installation_id: String) -> Res
 #[tauri::command]
 pub async fn installation_logs(app: AppHandle, installation_id: String) -> Result<String> {
     let (inst, workdir) = installation_with_workdir(&app, &installation_id)?;
-    let target = target_of(&app, &inst.target)?;
-    let script = script::logs_script(
-        &script_dir(&inst.dir, &target),
-        workdir.as_deref(),
-        target.is_windows_local(),
-    );
-    let cap = exec::run_capture(&target, &script, Duration::from_secs(45)).await?;
+    let script = script::logs_script(&script_dir(&inst.dir), workdir.as_deref(), cfg!(windows));
+    let cap = exec::run_capture(&script, Duration::from_secs(45)).await?;
     if cap.code != 0 && cap.stdout.trim().is_empty() {
         bail!(
             "Journaux indisponibles : {}",
@@ -785,16 +650,8 @@ fn installation_with_workdir(app: &AppHandle, id: &str) -> Result<(Installation,
     let workdir = catalog
         .catalog
         .app(&inst.app_id)
-        .and_then(|a| {
-            a.targets
-                .get(if inst.is_local() {
-                    TargetKind::Local
-                } else {
-                    TargetKind::Server
-                })
-                .cloned()
-        })
-        .and_then(|t| t.workdir);
+        .and_then(|a| a.targets.local.as_ref())
+        .and_then(|t| t.workdir.clone());
     Ok((inst, workdir))
 }
 
@@ -854,10 +711,7 @@ mod tests {
         let mia = catalog.app("mia").unwrap();
         let t = mia.targets.local.as_ref().unwrap();
         let v = BTreeMap::new();
-        assert_eq!(
-            render_url(&t.url, t, &v, "localhost"),
-            "http://localhost:8080"
-        );
+        assert_eq!(render_url(&t.url, t, &v), "http://localhost:8080");
     }
 
     #[test]
@@ -873,15 +727,22 @@ mod tests {
         v.insert("MIA_ADMIN_PASSWORD".into(), "assez-long-1".into());
         assert!(validate_values(mia, t, &v).is_ok());
         // Conditional fields are only required when active.
-        let brief = catalog.app("mybrief").unwrap();
-        let s = brief.targets.server.as_ref().unwrap();
+        let t: TargetDef = serde_json::from_str(
+            r#"{"url": "http://localhost", "install": [], "update": [], "fields": [
+                {"key": "MODE", "label": "Mode", "kind": "select", "required": true, "default": "a",
+                 "options": [{"value": "a", "label": "A"}, {"value": "b", "label": "B"}]},
+                {"key": "NET", "label": "Réseau", "kind": "text", "required": true,
+                 "when": {"key": "MODE", "in": ["b"]}}]}"#,
+        )
+        .unwrap();
         let mut v = BTreeMap::new();
-        v.insert("DOMAIN".into(), "brief.example.com".into());
-        v.insert("PROXY_MODE".into(), "traefik".into());
-        v.insert("TRAEFIK_NETWORK".into(), "web".into());
-        v.insert("ADMIN_SEED_EMAIL".into(), "a@b.fr".into());
-        v.insert("ADMIN_SEED_PASSWORD".into(), "longenough".into());
-        assert!(validate_values(brief, s, &v).is_ok());
+        assert!(validate_values(mia, &t, &v).is_ok());
+        v.insert("MODE".into(), "b".into());
+        assert!(validate_values(mia, &t, &v).is_err());
+        v.insert("NET".into(), "web".into());
+        assert!(validate_values(mia, &t, &v).is_ok());
+        v.insert("MODE".into(), "c".into());
+        assert!(validate_values(mia, &t, &v).is_err());
     }
 
     #[test]

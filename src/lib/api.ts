@@ -4,7 +4,6 @@ import type {
   OpInfo,
   Overview,
   RuntimeStatus,
-  Server,
   Settings,
   TokenStatus,
 } from "./types";
@@ -38,12 +37,9 @@ export const api = {
   githubStatus: () => call<TokenStatus>("github_status"),
   setGithubToken: (token: string) => call<TokenStatus>("set_github_token", { token }),
   clearGithubToken: () => call<void>("clear_github_token"),
-  checkHost: (target: string) => call<HostCheck>("check_host", { target }),
-  saveServer: (server: Server) => call<Server>("save_server", { server }),
-  deleteServer: (id: string) => call<void>("delete_server", { id }),
-  defaultInstallDir: (appId: string, target: string) =>
-    call<string>("default_install_dir", { appId, target }),
-  install: (req: { appId: string; target: string; dir: string; values: Record<string, string> }) =>
+  checkHost: () => call<HostCheck>("check_host"),
+  defaultInstallDir: (appId: string) => call<string>("default_install_dir", { appId }),
+  install: (req: { appId: string; dir: string; values: Record<string, string> }) =>
     call<string>("install_app", { req }),
   runAction: (installationId: string, action: "update" | "start" | "stop" | "restart" | "remove") =>
     call<string>("run_action", { installationId, action }),
@@ -76,13 +72,6 @@ export async function revealDir(path: string) {
   if (!isTauri) return;
   const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   await revealItemInDir(path);
-}
-
-export async function pickFile(title: string): Promise<string | null> {
-  if (!isTauri) return null;
-  const { open } = await import("@tauri-apps/plugin-dialog");
-  const r = await open({ title, multiple: false, directory: false });
-  return typeof r === "string" ? r : null;
 }
 
 export async function pickDir(title: string): Promise<string | null> {

@@ -473,10 +473,7 @@ mod tests {
         let catalog = Catalog::parse(EMBEDDED).unwrap();
         let values = BTreeMap::new();
         for app in &catalog.apps {
-            for target in [&app.targets.local, &app.targets.server]
-                .into_iter()
-                .flatten()
-            {
+            if let Some(target) = &app.targets.local {
                 for action in [
                     Action::Install,
                     Action::Update,

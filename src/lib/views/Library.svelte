@@ -2,6 +2,7 @@
   import { launcher } from "../launcher.svelte";
   import { relativeTime } from "../format";
   import AppCard from "../components/AppCard.svelte";
+  import ServerOffer from "../components/ServerOffer.svelte";
   import Icon from "../components/Icon.svelte";
 
   const o = $derived(launcher.overview!);
@@ -53,6 +54,8 @@
       <AppCard {app} index={i} />
     {/each}
   </section>
+
+  <ServerOffer />
 </div>
 
 <style>

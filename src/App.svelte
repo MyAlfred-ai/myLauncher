@@ -6,7 +6,7 @@
   import InstallDialog from "./lib/components/InstallDialog.svelte";
   import Library from "./lib/views/Library.svelte";
   import AppDetail from "./lib/views/AppDetail.svelte";
-  import Servers from "./lib/views/Servers.svelte";
+  import Contact from "./lib/views/Contact.svelte";
   import Activity from "./lib/views/Activity.svelte";
   import OpView from "./lib/views/OpView.svelte";
   import SettingsView from "./lib/views/Settings.svelte";
@@ -16,11 +16,11 @@
     launcher.init();
   });
 
-  const nav: { id: "library" | "servers" | "activity" | "settings"; label: string; icon: IconName }[] = [
+  const nav: { id: "library" | "activity" | "settings" | "contact"; label: string; short?: string; icon: IconName }[] = [
     { id: "library", label: "Applications", icon: "apps" },
-    { id: "servers", label: "Serveurs", icon: "server" },
     { id: "activity", label: "Activité", icon: "activity" },
     { id: "settings", label: "Réglages", icon: "settings" },
+    { id: "contact", label: "Infos & contact", short: "Contact", icon: "message" },
   ];
 
   const section = $derived.by(() => {
@@ -56,7 +56,8 @@
           onclick={() => launcher.go({ name: item.id })}
         >
           <Icon name={item.icon} size={19} />
-          <span>{item.label}</span>
+          <span class="nav-label">{item.label}</span>
+          {#if item.short}<span class="nav-short">{item.short}</span>{/if}
           {#if item.id === "library" && launcher.updateCount}
             <span class="badge" title="Mises à jour disponibles">{launcher.updateCount}</span>
           {:else if item.id === "activity" && running}
@@ -89,8 +90,10 @@
       {#key launcher.view.id}
         <AppDetail id={launcher.view.id} tab={launcher.view.tab} />
       {/key}
-    {:else if launcher.view.name === "servers"}
-      <Servers />
+    {:else if launcher.view.name === "contact"}
+      {#key launcher.view.appId}
+        <Contact appId={launcher.view.appId} />
+      {/key}
     {:else if launcher.view.name === "activity"}
       <Activity />
     {:else if launcher.view.name === "op"}
@@ -104,7 +107,7 @@
 </div>
 
 {#if launcher.installing}
-  <InstallDialog appId={launcher.installing.appId} initialTarget={launcher.installing.target} />
+  <InstallDialog appId={launcher.installing.appId} />
 {/if}
 <Toasts />
 
@@ -183,6 +186,9 @@
   .nav-item.active {
     background: var(--primary-soft);
     color: var(--primary);
+  }
+  .nav-short {
+    display: none;
   }
   .badge {
     margin-left: auto;
@@ -266,6 +272,12 @@
       justify-content: center;
       font-size: 11px;
       padding: 0 4px;
+    }
+    .nav-item:has(.nav-short) .nav-label {
+      display: none;
+    }
+    .nav-short {
+      display: inline;
     }
     .badge {
       position: absolute;

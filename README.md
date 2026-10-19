@@ -1,23 +1,25 @@
 # MyAlfred Launcher
 
 Application de bureau (macOS, Windows, Linux) qui installe, lance et met à jour les applications
-MyAlfred : **MIA**, **myBrief**, **myTrix** et **myBrain**. Les installations se font sur le poste ou
-sur un serveur Linux via SSH ; les nouvelles versions sont détectées et s'appliquent en un clic.
+MyAlfred : **MIA**, **myBrief**, **myTrix** et **myBrain**, sur le poste de l'utilisateur ; les
+nouvelles versions sont détectées et s'appliquent en un clic. L'installation sur un serveur, pour
+toute une équipe, est proposée par MyAlfred.ai (page « Infos & contact » du launcher).
 
 ![Interface](docs/apercu.jpg)
 
 ## Ce que fait le launcher
 
 - **Catalogue des 4 applications** : présentation, prérequis, dernière version publiée, nouveautés.
-- **Installation guidée** : choix de la destination (ce poste ou un serveur), vérification de Docker,
-  Compose et Git, formulaire de configuration propre à chaque application, suivi en direct
+- **Installation guidée sur ce poste** : vérification de Docker, Compose et Git, formulaire de configuration propre à chaque application, suivi en direct
   (étapes et journal détaillé).
 - **Mises à jour** : vérification au démarrage puis à intervalle régulier, notification système,
   « Tout mettre à jour », mises à jour automatiques activables par installation. Une sauvegarde
   est faite avant quand l'application le prévoit.
-- **Exploitation** : ouvrir, démarrer, arrêter, redémarrer, journaux des conteneurs, désinstaller
-  (les données sont conservées).
-- **Serveurs** : connexion SSH par clé (client `ssh` du système, agent et `~/.ssh/config` respectés).
+- **Exploitation** : se connecter, démarrer, arrêter (depuis l'accueil ou la fiche de l'application),
+  redémarrer, journaux des conteneurs, désinstaller (les données sont conservées).
+- **Infos & contact** : offres de MyAlfred.ai pour une installation sur serveur (installation,
+  hébergement en Europe, maintenance, formation), prise de rendez-vous, formulaire et e-mail.
+  Les liens sont dans [src/lib/contact.ts](src/lib/contact.ts).
 - **Mise à jour du launcher lui-même** : paquets signés, vérifiés avant installation.
 - Interface en français, thème clair/sombre, utilisable de 380 px à plein écran.
 
@@ -31,7 +33,7 @@ scripts (`install.sh`, `./mytrix installer`…), comme le ferait un administrate
 Interface (Svelte 5)  ──invoke──▶  Cœur Rust (Tauri 2)
                                      ├─ catalog/apps.json : description de chaque application
                                      ├─ GitHub API : versions, nouveautés, catalogue à jour
-                                     └─ script bash généré ──▶ bash (ce poste) ou ssh … bash -s (serveur)
+                                     └─ script bash généré ──▶ bash -s (ce poste)
 ```
 
 - **Catalogue** ([catalog/apps.json](catalog/apps.json)) : dépôt, source de la version, champs du
@@ -41,7 +43,7 @@ Interface (Svelte 5)  ──invoke──▶  Cœur Rust (Tauri 2)
 - **Versions** : selon l'application, dernière release, plus haut tag, fichier `VERSION` /
   `src/version.json`, ou dernier commit de `main`.
 - **Exécution** : le script est envoyé sur l'entrée standard de `bash` ; les secrets n'apparaissent
-  jamais dans une ligne de commande. Le même script sert en local et en SSH.
+  jamais dans une ligne de commande.
 
 ### Format d'une étape
 
@@ -118,5 +120,4 @@ HTTPS anonyme. La mise à jour du launcher fonctionne dès que les releases de c
 - **Windows** : les scripts des applications sont en bash ; le launcher utilise Git for Windows
   (Git Bash) avec Docker Desktop. À valider sur un vrai poste Windows.
 - **myBrief en local** : expérimental (ports 80/443, certificat auto-signé sur `https://localhost`).
-- **myTrix sur serveur** : expérimental tant qu'aucune image n'est publiée (construction sur le serveur).
 - **macOS** : sans signature Apple, le premier lancement demande un clic droit → Ouvrir.

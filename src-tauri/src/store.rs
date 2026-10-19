@@ -1,4 +1,4 @@
-//! Persistent state: launcher settings, servers and installations.
+//! Persistent state: launcher settings and installations.
 //! Stored as JSON in the app data folder; never contains secrets.
 
 use std::collections::BTreeMap;
@@ -40,41 +40,6 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Server {
-    pub id: String,
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub user: String,
-    #[serde(default)]
-    pub identity_file: Option<String>,
-    /// Parent folder of installs on the server, `~/myalfred` by default.
-    pub base_dir: String,
-}
-
-impl Server {
-    pub fn validate(&self) -> Result<()> {
-        let host_re = regex_lite::Regex::new(r"^[A-Za-z0-9][A-Za-z0-9.\-:]*$").unwrap();
-        let user_re = regex_lite::Regex::new(r"^[A-Za-z0-9_][A-Za-z0-9._\-]*$").unwrap();
-        if self.name.trim().is_empty() {
-            bail!("Donnez un nom au serveur.");
-        }
-        if !host_re.is_match(&self.host) {
-            bail!("Adresse de serveur invalide.");
-        }
-        if !user_re.is_match(&self.user) {
-            bail!("Nom d'utilisateur SSH invalide.");
-        }
-        if self.port == 0 {
-            bail!("Port SSH invalide.");
-        }
-        check_dir(&self.base_dir)?;
-        Ok(())
-    }
-}
-
 /// Install folders: absolute, or `~/…`; no quotes or control characters.
 pub fn check_dir(dir: &str) -> Result<()> {
     let ok_start =
@@ -108,7 +73,9 @@ pub enum InstallState {
 pub struct Installation {
     pub id: String,
     pub app_id: String,
-    /// `local` or a server id.
+    /// Always `local`. Launchers up to 0.1.1 could also record a server id:
+    /// such installations are dropped when the state is loaded.
+    #[serde(default = "local_target")]
     pub target: String,
     pub dir: String,
     /// Non-secret form values, reused by later operations.
@@ -131,6 +98,10 @@ pub struct Installation {
     pub notified_version: Option<String>,
 }
 
+fn local_target() -> String {
+    "local".into()
+}
+
 impl Installation {
     pub fn is_local(&self) -> bool {
         self.target == "local"
@@ -140,14 +111,10 @@ impl Installation {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Store {
-    pub servers: Vec<Server>,
     pub installations: Vec<Installation>,
 }
 
 impl Store {
-    pub fn server(&self, id: &str) -> Option<&Server> {
-        self.servers.iter().find(|s| s.id == id)
-    }
     pub fn installation(&self, id: &str) -> Option<&Installation> {
         self.installations.iter().find(|i| i.id == id)
     }
@@ -194,21 +161,5 @@ mod tests {
         assert!(check_dir("relative/path").is_err());
         assert!(check_dir("/opt/../etc").is_err());
         assert!(check_dir("/opt/$(rm)").is_err());
-    }
-
-    #[test]
-    fn validates_servers() {
-        let mut s = Server {
-            id: "s1".into(),
-            name: "Prod".into(),
-            host: "vps.example.com".into(),
-            port: 22,
-            user: "ubuntu".into(),
-            identity_file: None,
-            base_dir: "~/myalfred".into(),
-        };
-        assert!(s.validate().is_ok());
-        s.host = "-oProxyCommand=evil".into();
-        assert!(s.validate().is_err());
     }
 }

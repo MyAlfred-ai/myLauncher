@@ -31,7 +31,7 @@
     "targets": "all",
     "category": "Utility",
     "shortDescription": "Installe et met à jour les applications MyAlfred",
-    "longDescription": "Le launcher MyAlfred installe MIA, myBrief, myTrix et myBrain sur votre poste ou sur un serveur, détecte les nouvelles versions et les applique en un clic.",
+    "longDescription": "Le launcher MyAlfred installe MIA, myBrief, myTrix et myBrain sur votre poste, détecte les nouvelles versions et les applique en un clic.",
     "copyright": "© MyAlfred",
     "publisher": "MyAlfred",
     "homepage": "https://myalfred.ai",

@@ -46,7 +46,7 @@ export interface AppDef {
   version: { source: "releases" | "tags" | "file" | "commit"; path?: string | null };
   changelog?: { source: "file" | "releases" | "commits"; path?: string | null } | null;
   requirements: string[];
-  targets: { local?: TargetDef | null; server?: TargetDef | null };
+  targets: { local?: TargetDef | null };
 }
 
 export interface Catalog {
@@ -75,7 +75,6 @@ export type InstallState = "installing" | "ready" | "failed";
 export interface Installation {
   id: string;
   appId: string;
-  target: string;
   dir: string;
   values: Record<string, string>;
   version?: string | null;
@@ -85,19 +84,8 @@ export interface Installation {
   installedAt: string;
   updatedAt?: string | null;
   autoUpdate: boolean;
-  targetLabel: string;
   updateAvailable: boolean;
   busyOp: string | null;
-}
-
-export interface Server {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  user: string;
-  identityFile?: string | null;
-  baseDir: string;
 }
 
 export interface Settings {
@@ -117,7 +105,6 @@ export interface OpInfo {
   installationId: string;
   appId: string;
   action: OpAction;
-  targetLabel: string;
   status: OpStatus;
   steps: string[];
   currentStep: number;
@@ -141,7 +128,6 @@ export interface Overview {
   catalogFetchedAt: string | null;
   latest: Record<string, LatestState>;
   installations: Installation[];
-  servers: Server[];
   ops: OpInfo[];
   settings: Settings;
   hasToken: boolean;

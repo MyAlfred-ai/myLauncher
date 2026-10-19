@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Notify;
 
 use crate::error::{bail, Result};
-use crate::exec::{self, Stream, Target};
+use crate::exec::{self, Stream};
 use crate::script::Action;
 use crate::state::{now, state};
 use crate::store::InstallState;
@@ -26,7 +26,6 @@ pub struct OpInfo {
     pub installation_id: String,
     pub app_id: String,
     pub action: String,
-    pub target_label: String,
     /// `running`, `success`, `failed` or `cancelled`.
     pub status: String,
     pub steps: Vec<String>,
@@ -129,8 +128,6 @@ pub struct OpRequest {
     pub installation_id: String,
     pub app_id: String,
     pub action: Action,
-    pub target: Target,
-    pub target_label: String,
     pub script: String,
     pub steps: Vec<String>,
 }
@@ -169,7 +166,6 @@ pub fn spawn(app: &AppHandle, req: OpRequest) -> Result<String> {
         installation_id: req.installation_id.clone(),
         app_id: req.app_id.clone(),
         action: action_name(req.action).into(),
-        target_label: req.target_label.clone(),
         status: "running".into(),
         steps: req.steps.clone(),
         current_step: 0,
@@ -210,10 +206,9 @@ async fn run(
     if let Some(f) = file.as_mut() {
         let _ = writeln!(
             f,
-            "# {} {} — {} — {}",
+            "# {} {} — {}",
             action_name(req.action),
             req.app_id,
-            req.target_label,
             chrono::Local::now().to_rfc2822()
         );
     }
@@ -235,11 +230,10 @@ async fn run(
 
     let mut results: BTreeMap<String, String> = BTreeMap::new();
     let mut last_error: Option<String> = None;
-    let mut stderr_tail: Vec<String> = Vec::new();
     let mut seq: u64 = 0;
     let st = state(&app);
 
-    let outcome = exec::run_streaming(&req.target, &req.script, cancel, |stream, text| {
+    let outcome = exec::run_streaming(&req.script, cancel, |stream, text| {
         let (kind, shown) = if let Some(step) = text.strip_prefix("::ml::step::") {
             let step = step.to_string();
             if let Some(info) = st.ops.update(&op_id, |e| {
@@ -263,12 +257,6 @@ async fn run(
             last_error = Some(e.to_string());
             ("error", e.to_string())
         } else {
-            if stream == Stream::Err && !text.trim().is_empty() {
-                stderr_tail.push(text.clone());
-                if stderr_tail.len() > 5 {
-                    stderr_tail.remove(0);
-                }
-            }
             (if stream == Stream::Err { "err" } else { "out" }, text)
         };
         if let Some(f) = file.as_mut() {
@@ -304,9 +292,8 @@ async fn run(
     let (status, error) = match outcome {
         Ok(Some(0)) => ("success", None),
         Ok(Some(code)) => {
-            let msg = last_error.unwrap_or_else(|| match &req.target {
-                Target::Ssh(_) if code == 255 => exec::ssh_error(&stderr_tail.join("\n")),
-                _ => format!("L'opération a échoué (code {code}). Consultez le journal."),
+            let msg = last_error.unwrap_or_else(|| {
+                format!("L'opération a échoué (code {code}). Consultez le journal.")
             });
             ("failed", Some(msg))
         }

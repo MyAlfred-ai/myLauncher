@@ -12,10 +12,8 @@
   const status = $derived(appStatus(installs));
   const latest = $derived(launcher.latest(app.id));
   const toUpdate = $derived(installs.filter((i) => i.updateAvailable && !i.busyOp));
-  // The installation driven from the card: this computer first.
-  const primary = $derived(
-    installs.filter((i) => i.state === "ready").sort((a, b) => Number(b.target === "local") - Number(a.target === "local"))[0],
-  );
+  // The installation driven from the card.
+  const primary = $derived(installs.find((i) => i.state === "ready"));
   const rt = $derived(primary ? launcher.runtime[primary.id] : undefined);
   const op = $derived(primary?.busyOp ? launcher.ops[primary.busyOp] : undefined);
   const stopped = $derived(isStopped(rt?.status));
@@ -112,7 +110,7 @@
           {:else if primary.url}
             <span class="address mono">{addressLabel(primary.url)}</span>
           {:else}
-            <span class="address">{primary.targetLabel}</span>
+            <span class="address">Ce poste</span>
           {/if}
           {#if op}
             <span class="busy" title="{actionLabels[op.action] ?? 'Opération'} en cours">

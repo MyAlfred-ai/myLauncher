@@ -1,5 +1,4 @@
-//! Runs a bash script on this machine or on a server through the system
-//! `ssh` client (keys, agent and ~/.ssh/config are honoured as usual).
+//! Runs a bash script on this machine (Git Bash on Windows).
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -11,20 +10,6 @@ use tokio::process::Command;
 use tokio::sync::Notify;
 
 use crate::error::{bail, Error, Result};
-use crate::store::Server;
-
-#[derive(Debug, Clone)]
-pub enum Target {
-    Local,
-    Ssh(Server),
-}
-
-impl Target {
-    /// Git Bash on Windows needs a few compatibility switches.
-    pub fn is_windows_local(&self) -> bool {
-        matches!(self, Target::Local) && cfg!(windows)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stream {
@@ -55,60 +40,19 @@ pub fn find_bash() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.exists())
 }
 
-pub fn ssh_args(server: &Server) -> Vec<String> {
-    let mut args = vec![
-        "-T".to_string(),
-        "-o".into(),
-        "BatchMode=yes".into(),
-        "-o".into(),
-        "ConnectTimeout=15".into(),
-        "-o".into(),
-        "StrictHostKeyChecking=accept-new".into(),
-        "-o".into(),
-        "ServerAliveInterval=30".into(),
-        "-p".into(),
-        server.port.to_string(),
-    ];
-    if let Some(key) = server
-        .identity_file
-        .as_deref()
-        .filter(|k| !k.trim().is_empty())
-    {
-        args.push("-i".into());
-        args.push(key.to_string());
-        args.push("-o".into());
-        args.push("IdentitiesOnly=yes".into());
-    }
-    args.push(format!("{}@{}", server.user, server.host));
-    args.push("bash -s".into());
-    args
-}
-
-fn command_for(target: &Target) -> Result<Command> {
-    let mut cmd = match target {
-        Target::Local => {
-            let Some(bash) = find_bash() else {
-                bail!("Bash est introuvable. Sous Windows, installez Git for Windows (git-scm.com), puis relancez le launcher.");
-            };
-            let mut c = Command::new(bash);
-            c.arg("-s");
-            c
-        }
-        Target::Ssh(server) => {
-            let mut c = Command::new("ssh");
-            c.args(ssh_args(server));
-            c
-        }
+fn command() -> Result<Command> {
+    let Some(bash) = find_bash() else {
+        bail!("Bash est introuvable. Sous Windows, installez Git for Windows (git-scm.com), puis relancez le launcher.");
     };
-    cmd.stdin(Stdio::piped())
+    let mut cmd = Command::new(bash);
+    cmd.arg("-s")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    if let Target::Local = target {
+        .kill_on_drop(true)
         // Avoid any interactive prompt from git or docker.
-        cmd.env("GIT_TERMINAL_PROMPT", "0")
-            .env("DOCKER_CLI_HINTS", "false");
-    }
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("DOCKER_CLI_HINTS", "false");
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -144,7 +88,6 @@ pub fn clean_line(raw: &[u8]) -> String {
 /// Streams the script output line by line. Returns the exit code
 /// (`None` when cancelled).
 pub async fn run_streaming<F>(
-    target: &Target,
     script: &str,
     cancel: Arc<Notify>,
     mut on_line: F,
@@ -152,14 +95,9 @@ pub async fn run_streaming<F>(
 where
     F: FnMut(Stream, String) + Send,
 {
-    let mut child = command_for(target)?.spawn().map_err(|e| {
-        Error::msg(match target {
-            Target::Local => format!("Impossible de lancer bash : {e}"),
-            Target::Ssh(_) => {
-                format!("Impossible de lancer ssh : {e}. Le client OpenSSH est-il installé ?")
-            }
-        })
-    })?;
+    let mut child = command()?
+        .spawn()
+        .map_err(|e| Error::msg(format!("Impossible de lancer bash : {e}")))?;
 
     let mut stdin = child.stdin.take().expect("stdin piped");
     let script = script.to_owned();
@@ -206,11 +144,11 @@ pub struct Captured {
 }
 
 /// Runs a short read-only script and collects its output.
-pub async fn run_capture(target: &Target, script: &str, timeout: Duration) -> Result<Captured> {
+pub async fn run_capture(script: &str, timeout: Duration) -> Result<Captured> {
     let cancel = Arc::new(Notify::new());
     let mut stdout = String::new();
     let mut stderr = String::new();
-    let fut = run_streaming(target, script, cancel.clone(), |stream, line| {
+    let fut = run_streaming(script, cancel.clone(), |stream, line| {
         let buf = if stream == Stream::Out {
             &mut stdout
         } else {
@@ -229,7 +167,7 @@ pub async fn run_capture(target: &Target, script: &str, timeout: Duration) -> Re
         Ok(Err(e)) => Err(e),
         Err(_) => {
             cancel.notify_one();
-            bail!("La machine ne répond pas (délai dépassé).")
+            bail!("Le poste ne répond pas (délai dépassé).")
         }
     }
 }
@@ -242,33 +180,6 @@ pub fn results(stdout: &str) -> std::collections::BTreeMap<String, String> {
         .filter_map(|kv| kv.split_once('='))
         .map(|(k, v)| (k.to_string(), v.trim().to_string()))
         .collect()
-}
-
-/// Turns an ssh failure into a readable message.
-pub fn ssh_error(stderr: &str) -> String {
-    let last = stderr
-        .lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("")
-        .trim();
-    if last.contains("Permission denied") {
-        "Connexion refusée : la clé SSH n'est pas acceptée par le serveur.".into()
-    } else if last.contains("Could not resolve hostname") {
-        "Adresse du serveur introuvable.".into()
-    } else if last.contains("Connection refused") {
-        "Le serveur refuse la connexion SSH (port fermé ?).".into()
-    } else if last.contains("timed out") {
-        "Le serveur ne répond pas (délai dépassé).".into()
-    } else if last.contains("Host key verification failed")
-        || last.contains("REMOTE HOST IDENTIFICATION")
-    {
-        "L'empreinte du serveur a changé depuis la dernière connexion : vérifiez ~/.ssh/known_hosts.".into()
-    } else if last.is_empty() {
-        "Connexion SSH impossible.".into()
-    } else {
-        format!("Connexion SSH impossible : {last}")
-    }
 }
 
 #[cfg(test)]
@@ -295,7 +206,6 @@ mod tests {
             return;
         }
         let cap = run_capture(
-            &Target::Local,
             "{ echo out; echo err >&2; read -r x || echo no-stdin; exit 3; } < /dev/null\n",
             Duration::from_secs(10),
         )

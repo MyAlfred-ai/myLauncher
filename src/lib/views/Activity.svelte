@@ -21,7 +21,7 @@
             <img src={app ? appIcon(app.icon) : ""} alt="" width="40" height="40" />
             <span class="text">
               <strong>{actionLabels[op.action]} de {app?.name ?? op.appId}</strong>
-              <span class="muted">{op.targetLabel} · {relativeTime(op.startedAt)}</span>
+              <span class="muted">{relativeTime(op.startedAt)}</span>
             </span>
             {#if op.status === "running"}
               <span class="pill brand"><Icon name="loader" size={12} class="spin" /> {op.steps[op.currentStep] ?? "En cours"}</span>

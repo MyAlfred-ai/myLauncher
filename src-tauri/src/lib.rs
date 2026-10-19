@@ -14,7 +14,7 @@ mod version;
 use tauri::Manager;
 
 /// Apps launched from the Finder / Start menu get a minimal PATH: add the
-/// usual locations of docker, git and ssh so they are found.
+/// usual locations of docker and git so they are found.
 fn extend_path() {
     if cfg!(windows) {
         return;
@@ -68,8 +68,6 @@ pub fn run() {
             commands::set_github_token,
             commands::clear_github_token,
             commands::check_host,
-            commands::save_server,
-            commands::delete_server,
             commands::default_install_dir,
             commands::install_app,
             commands::run_action,

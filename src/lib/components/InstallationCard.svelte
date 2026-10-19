@@ -76,7 +76,7 @@
   }
 
   function retry() {
-    launcher.installing = { appId: inst.appId, target: inst.target };
+    launcher.installing = { appId: inst.appId };
   }
 </script>
 
@@ -85,9 +85,9 @@
 <div class="inst card" class:busy={!!op}>
   <div class="row top">
     <div class="where">
-      <div class="where-icon"><Icon name={inst.target === "local" ? "laptop" : "server"} size={20} /></div>
+      <div class="where-icon"><Icon name="laptop" size={20} /></div>
       <div class="where-text">
-        <strong>{inst.targetLabel}</strong>
+        <strong>Ce poste</strong>
         <span class="muted mono truncate selectable" title={inst.dir}>{inst.dir}</span>
       </div>
     </div>
@@ -173,7 +173,7 @@
             <button role="menuitem" onclick={showLogs}><Icon name="terminal" size={16} /> Journaux de l'application</button>
             <button role="menuitem" onclick={() => refreshStatus()}><Icon name="refresh" size={16} /> Actualiser l'état</button>
           {/if}
-          {#if inst.target === "local" && isTauri}
+          {#if isTauri}
             <button role="menuitem" onclick={() => revealDir(inst.dir)}><Icon name="folder" size={16} /> Ouvrir le dossier</button>
           {/if}
           {#if inst.state === "ready"}
@@ -196,7 +196,7 @@
 {#if confirm}
   <Modal
     title={confirm === "remove" ? `Désinstaller ${app?.name} ?` : `Retirer ${app?.name} du launcher ?`}
-    subtitle={inst.targetLabel}
+    subtitle="Ce poste"
     width={480}
     onclose={() => (confirm = null)}
   >
@@ -207,7 +207,7 @@
         <span>Vos données (bases, volumes Docker, fichiers .env) et le dossier <span class="mono">{inst.dir}</span> sont <strong>conservés</strong> : une réinstallation dans le même dossier les retrouve.</span>
       </div>
     {:else}
-      <p>Le launcher oublie cette installation. Rien n'est modifié sur {inst.target === "local" ? "ce poste" : "le serveur"} : l'application continue de tourner si elle était démarrée.</p>
+      <p>Le launcher oublie cette installation. Rien n'est modifié sur ce poste : l'application continue de tourner si elle était démarrée.</p>
     {/if}
     {#snippet footer()}
       <button class="btn" onclick={() => (confirm = null)}>Annuler</button>

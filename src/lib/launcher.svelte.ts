@@ -4,7 +4,7 @@ import type { AppDef, Installation, LogLine, OpInfo, Overview, RuntimeStatus } f
 export type View =
   | { name: "library" }
   | { name: "app"; id: string; tab?: "installs" | "about" | "news" }
-  | { name: "servers" }
+  | { name: "contact"; appId?: string }
   | { name: "activity" }
   | { name: "op"; id: string }
   | { name: "settings" };
@@ -35,7 +35,7 @@ class Launcher {
   toasts = $state<Toast[]>([]);
   checking = $state(false);
   /** App whose install dialog is open. */
-  installing = $state<{ appId: string; target?: string } | null>(null);
+  installing = $state<{ appId: string } | null>(null);
   /** Containers' state per installation, shared by the library and the app page. */
   runtime = $state<Record<string, Runtime>>({});
 

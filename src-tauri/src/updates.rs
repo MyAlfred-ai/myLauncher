@@ -155,11 +155,11 @@ pub fn notify_op(app: &AppHandle, op: &OpInfo) {
     let (title, body) = match (op.action.as_str(), op.status.as_str()) {
         ("install", "success") => (
             format!("{name} est installé"),
-            format!("Prêt sur {}.", op.target_label),
+            "Prêt à l'emploi sur ce poste.".to_string(),
         ),
         ("update", "success") => (
             format!("{name} est à jour"),
-            format!("Mise à jour terminée sur {}.", op.target_label),
+            "La nouvelle version est en service.".to_string(),
         ),
         (_, "cancelled") => return,
         _ => (

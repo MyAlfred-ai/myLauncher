@@ -69,7 +69,7 @@
       <img src={appIcon(app.icon)} alt="" width="72" height="72" />
       <div class="head-text">
         <h1>{actionLabels[op.action]} de {app.name}</h1>
-        <p class="muted">{op.targetLabel} · démarrée {formatDate(op.startedAt)}</p>
+        <p class="muted">Ce poste · démarrée {formatDate(op.startedAt)}</p>
       </div>
       <div class="head-status">
         {#if running}
@@ -110,7 +110,7 @@
           <span class="selectable">{op.error}</span>
         </div>
         {#if op.action === "install"}
-          <button class="btn" onclick={() => (launcher.installing = { appId: app.id, target: inst?.target })}><Icon name="refresh" size={16} /> Réessayer</button>
+          <button class="btn" onclick={() => (launcher.installing = { appId: app.id })}><Icon name="refresh" size={16} /> Réessayer</button>
         {:else if inst}
           <button class="btn" onclick={() => launcher.run(inst.id, op.action as "update")}><Icon name="refresh" size={16} /> Réessayer</button>
         {/if}

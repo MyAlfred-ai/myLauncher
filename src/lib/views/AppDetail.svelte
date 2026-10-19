@@ -6,6 +6,7 @@
   import Icon from "../components/Icon.svelte";
   import InstallationCard from "../components/InstallationCard.svelte";
   import Markdown from "../components/Markdown.svelte";
+  import ServerOffer from "../components/ServerOffer.svelte";
 
   let { id, tab: initialTab }: { id: string; tab?: "installs" | "about" | "news" } = $props();
 
@@ -28,9 +29,7 @@
     }
   });
 
-  const targets = $derived(
-    app ? [app.targets.local && "sur un poste", app.targets.server && "sur un serveur"].filter(Boolean).join(" ou ") : "",
-  );
+  const installed = $derived(installs.some((i) => i.state !== "failed"));
 </script>
 
 {#if app}
@@ -54,14 +53,19 @@
           {/if}
         </div>
         <div class="hero-actions">
-          <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>
-            <Icon name="download" size={17} />
-            {installs.length ? "Installer ailleurs" : "Installer"}
-          </button>
-          <span class="muted small">Installation {targets}</span>
+          {#if installed}
+            <span class="pill success"><Icon name="laptop" size={13} /> Installé sur ce poste</span>
+          {:else}
+            <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>
+              <Icon name="download" size={17} /> Installer
+            </button>
+            <span class="muted small">Sur ce poste, pour essayer ou travailler seul</span>
+          {/if}
         </div>
       </div>
     </header>
+
+    <ServerOffer appId={app.id} />
 
     {#if latest?.error}
       <div class="callout warning">
@@ -90,7 +94,7 @@
           <div class="empty card">
             <Icon name="download" size={28} />
             <h3>{app.name} n'est pas encore installé</h3>
-            <p class="muted">Installez-le sur ce poste pour l'essayer, ou sur un serveur pour toute l'équipe.</p>
+            <p class="muted">Installez-le sur ce poste pour l'essayer ou travailler seul.</p>
             <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>Installer {app.name}</button>
           </div>
         {/if}

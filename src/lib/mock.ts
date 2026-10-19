@@ -1,7 +1,7 @@
 // Demo backend used when the interface runs in a plain browser (npm run dev),
 // so the design can be reviewed without the desktop app.
 import catalogJson from "../../catalog/apps.json";
-import type { Catalog, Installation, LogLine, OpInfo, Overview, Server, Settings } from "./types";
+import type { Catalog, Installation, LogLine, OpInfo, Overview, Settings } from "./types";
 
 type Listener = (payload: unknown) => void;
 const listeners = new Map<string, Set<Listener>>();
@@ -28,14 +28,10 @@ let settings: Settings = {
   notify: true,
   catalogUrl: "https://api.github.com/repos/MyAlfred-ai/myLauncher/contents/catalog/apps.json?ref=main",
 };
-let servers: Server[] = [
-  { id: "srv-ovh", name: "VPS OVH", host: "vps-42.myalfred.ai", port: 22, user: "ubuntu", baseDir: "~/myalfred" },
-];
 let installations: Installation[] = [
   {
     id: "inst-mia",
     appId: "mia",
-    target: "local",
     dir: "/Users/demo/MyAlfred/mia",
     values: { MIA_PORT: "8080", MIA_ADMIN_EMAIL: "axel@myalfred.ai" },
     version: "1.5.0.2",
@@ -45,24 +41,21 @@ let installations: Installation[] = [
     installedAt: ago(240),
     updatedAt: ago(72),
     autoUpdate: false,
-    targetLabel: "Ce poste",
     updateAvailable: true,
     busyOp: null,
   },
   {
     id: "inst-brain",
     appId: "mybrain",
-    target: "srv-ovh",
-    dir: "~/myalfred/mybrain",
-    values: { MYBRAIN_DOMAIN: "brain.myalfred.ai" },
+    dir: "/Users/demo/MyAlfred/mybrain",
+    values: {},
     version: "9f8e7d6",
     commit: "9f8e7d6c",
-    url: "https://brain.myalfred.ai",
+    url: "http://localhost:5173",
     state: "ready",
     installedAt: ago(500),
     updatedAt: ago(20),
     autoUpdate: true,
-    targetLabel: "VPS OVH",
     updateAvailable: false,
     busyOp: null,
   },
@@ -91,7 +84,6 @@ function overview(): Overview {
       ...i,
       busyOp: ops.find((o) => o.installationId === i.id && o.status === "running")?.id ?? null,
     })),
-    servers,
     ops: [...ops].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
     settings,
     hasToken,
@@ -101,17 +93,15 @@ function overview(): Overview {
   };
 }
 
-function simulate(installationId: string, appId: string, action: OpInfo["action"], targetLabel: string) {
+function simulate(installationId: string, appId: string, action: OpInfo["action"]) {
   const app = catalog.apps.find((a) => a.id === appId)!;
-  const inst = installations.find((i) => i.id === installationId);
-  const tdef = inst?.target === "local" || !inst ? app.targets.local! : app.targets.server!;
+  const tdef = app.targets.local!;
   const steps = ["Vérification des prérequis", ...(action === "update" ? tdef.update : action === "install" ? tdef.install : [{ label: action === "stop" ? "Arrêt" : action === "restart" ? "Redémarrage" : "Démarrage", run: "" }]).map((s) => s.label)];
   const op: OpInfo = {
     id: `op-${Math.random().toString(36).slice(2, 9)}`,
     installationId,
     appId,
     action,
-    targetLabel,
     status: "running",
     steps,
     currentStep: 0,
@@ -197,50 +187,36 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
     case "check_host":
       return {
         reachable: true,
-        os: a.target === "local" ? "Darwin arm64" : "Linux x86_64",
+        os: "Darwin arm64",
         git: "git version 2.50.1",
         docker: "Docker version 28.5.1",
         compose: "2.39.4",
         daemon: true,
         error: null,
       } as T;
-    case "save_server": {
-      const s = a.server as Server;
-      if (!s.id) s.id = `srv-${Math.random().toString(36).slice(2, 7)}`;
-      servers = [...servers.filter((x) => x.id !== s.id), s];
-      emit("overview-changed", null);
-      return s as T;
-    }
-    case "delete_server":
-      servers = servers.filter((x) => x.id !== a.id);
-      emit("overview-changed", null);
-      return undefined as T;
     case "default_install_dir":
-      return (a.target === "local" ? `${settings.installDir}/${a.appId}` : `~/myalfred/${a.appId}`) as T;
+      return `${settings.installDir}/${a.appId}` as T;
     case "install_app": {
       const req = a.req;
       const id = `inst-${Math.random().toString(36).slice(2, 8)}`;
-      const label = req.target === "local" ? "Ce poste" : servers.find((s) => s.id === req.target)?.name ?? "";
       installations.push({
         id,
         appId: req.appId,
-        target: req.target,
         dir: req.dir,
         values: {},
         version: null,
         state: "installing",
         installedAt: new Date().toISOString(),
         autoUpdate: false,
-        targetLabel: label,
         updateAvailable: false,
         busyOp: null,
         url: "http://localhost:3000",
       });
-      return simulate(id, req.appId, "install", label) as T;
+      return simulate(id, req.appId, "install") as T;
     }
     case "run_action": {
       const inst = installations.find((i) => i.id === a.installationId)!;
-      return simulate(inst.id, inst.appId, a.action, inst.targetLabel) as T;
+      return simulate(inst.id, inst.appId, a.action) as T;
     }
     case "forget_installation":
       installations = installations.filter((i) => i.id !== a.installationId);

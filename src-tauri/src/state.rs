@@ -58,6 +58,9 @@ impl AppState {
             settings.install_dir = home_dir.join("MyAlfred").to_string_lossy().into_owned();
         }
         let mut store: Store = load_json(&data_dir.join("state.json"));
+        // Launchers up to 0.1.1 could install on servers: those installations
+        // are forgotten (nothing is changed on the servers themselves).
+        store.installations.retain(|i| i.is_local());
         // No operation survives a restart: an install left half-way can be resumed.
         for inst in &mut store.installations {
             if inst.state == InstallState::Installing {

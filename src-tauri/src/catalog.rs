@@ -113,26 +113,10 @@ pub enum DotenvQuote {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Targets {
+    /// Installation on this computer, the only one the launcher performs:
+    /// installs on a server are done by MyAlfred.ai.
     #[serde(default)]
     pub local: Option<TargetDef>,
-    #[serde(default)]
-    pub server: Option<TargetDef>,
-}
-
-impl Targets {
-    pub fn get(&self, kind: TargetKind) -> Option<&TargetDef> {
-        match kind {
-            TargetKind::Local => self.local.as_ref(),
-            TargetKind::Server => self.server.as_ref(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum TargetKind {
-    Local,
-    Server,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,7 +130,7 @@ pub struct TargetDef {
     /// Directory (relative to the repo) where `docker compose` runs.
     #[serde(default)]
     pub workdir: Option<String>,
-    /// URL template; `{{KEY}}` is replaced by form values, `{{HOST}}` by the server host.
+    /// URL template; `{{KEY}}` is replaced by form values.
     pub url: String,
     /// Rough duration of a first install, shown to the user.
     #[serde(default)]
@@ -295,10 +279,7 @@ impl Catalog {
                     bail!("Catalogue : clé de version invalide pour {}.", app.id);
                 }
             }
-            for t in [&app.targets.local, &app.targets.server]
-                .into_iter()
-                .flatten()
-            {
+            if let Some(t) = &app.targets.local {
                 if let Some(w) = &t.workdir {
                     check_rel_path(w, &app.id)?;
                 }

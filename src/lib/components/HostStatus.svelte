@@ -3,7 +3,7 @@
   import Icon from "./Icon.svelte";
   import { openUrl } from "../api";
 
-  let { check, loading, local }: { check: HostCheck | null; loading: boolean; local: boolean } = $props();
+  let { check, loading }: { check: HostCheck | null; loading: boolean } = $props();
 
   const items = $derived(
     check?.reachable
@@ -20,7 +20,7 @@
 
 <div class="host" class:ok={allOk} class:bad={check && !allOk}>
   {#if loading}
-    <span class="muted"><Icon name="loader" size={15} class="spin" /> Vérification de la machine…</span>
+    <span class="muted"><Icon name="loader" size={15} class="spin" /> Vérification du poste…</span>
   {:else if check && !check.reachable}
     <div class="row">
       <Icon name="x-circle" size={17} />
@@ -35,17 +35,13 @@
     </div>
     {#if !allOk}
       <p class="hint">
-        {#if local}
-          {#if !check.docker}
-            Installez Docker Desktop, lancez-le, puis vérifiez à nouveau.
-            <button class="link" onclick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>Télécharger Docker Desktop</button>
-          {:else if !check.daemon}
-            Lancez Docker Desktop et attendez qu'il soit prêt, puis vérifiez à nouveau.
-          {:else if !check.git}
-            Installez Git (sous macOS : <span class="mono">xcode-select --install</span>).
-          {/if}
-        {:else}
-          Installez Docker Engine et le plugin Compose sur le serveur, et ajoutez l'utilisateur au groupe « docker ».
+        {#if !check.docker}
+          Installez Docker Desktop, lancez-le, puis vérifiez à nouveau.
+          <button class="link" onclick={() => openUrl("https://www.docker.com/products/docker-desktop/")}>Télécharger Docker Desktop</button>
+        {:else if !check.daemon}
+          Lancez Docker Desktop et attendez qu'il soit prêt, puis vérifiez à nouveau.
+        {:else if !check.git}
+          Installez Git (sous macOS : <span class="mono">xcode-select --install</span>).
         {/if}
       </p>
     {/if}
