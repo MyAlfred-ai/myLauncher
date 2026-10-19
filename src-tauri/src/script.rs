@@ -628,6 +628,105 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
+    /// Runs myTrix's "Configuration" and "Construction et démarrage" steps with
+    /// a stub ./mytrix and a stub docker, so no container is ever touched.
+    #[test]
+    fn mytrix_install_steps_use_their_own_project_and_a_free_port() {
+        if cfg!(windows) {
+            return;
+        }
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mytrix").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let (config, build_step) = (&target.install[1], &target.install[2]);
+        let dir = std::env::temp_dir()
+            .join(format!("ml-test-{}", uuid::Uuid::new_v4()))
+            .join("Recette myTrix");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("mytrix"), "printf '%s\\n' \"$*\" > seen\n").unwrap();
+        // `ps.out`: containers already carrying the project name; `port.out`:
+        // what `docker compose port` answers when the app container is ours.
+        let docker = r#"docker() {
+  case "$1" in
+    ps) printf '%s\n' "$*" > docker-ps; cat ps.out 2>/dev/null || true ;;
+    compose) [ "$2" = port ] && cat port.out ;;
+    *) return 1 ;;
+  esac
+}
+"#;
+        let run = || {
+            let values = BTreeMap::new();
+            let dir_s = dir.to_string_lossy().into_owned();
+            let plan = Plan {
+                app,
+                target,
+                action: Action::Install,
+                dir: &dir_s,
+                values: &values,
+                git_ref: ("branch", "main"),
+                token: None,
+                windows: false,
+            };
+            let script = format!(
+                "{{\n{PRELUDE}{}{docker}cd \"$ML_WORK\"\n{}\ncd \"$ML_WORK\"\n{}\n}} < /dev/null\n",
+                context_block(&plan),
+                config.run,
+                build_step.run
+            );
+            run_bash(&script, &dir)
+        };
+        let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = busy.local_addr().unwrap().port();
+        std::fs::write(
+            dir.join(".env.example"),
+            format!("APP_PORT={port}\nPOSTGRES_USER=app\n"),
+        )
+        .unwrap();
+
+        // Containers of another install with the same project name: nothing is written.
+        std::fs::write(dir.join("ps.out"), "0123456789ab\n").unwrap();
+        let out = run();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains(
+            "::ml::error::Des conteneurs Docker portent déjà le nom « myalfred-recette-mytrix »"
+        ));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("docker-ps")).unwrap(),
+            "ps -aq --filter label=com.docker.compose.project=myalfred-recette-mytrix\n"
+        );
+        assert!(!dir.join(".env").exists());
+        std::fs::remove_file(dir.join("ps.out")).unwrap();
+
+        // A port held by another program (the development myTrix…) is refused before
+        // any build; the .env already names the install's own project and images.
+        let out = run();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr)
+            .contains(&format!("::ml::error::Le port {port} est déjà utilisé")));
+        assert!(!dir.join("seen").exists());
+        let env = std::fs::read_to_string(dir.join(".env")).unwrap();
+        assert!(env.contains("COMPOSE_PROJECT_NAME='myalfred-recette-mytrix'\n"), "{env}");
+        assert!(env.contains("APP_VERSION='myalfred-recette-mytrix'\n"), "{env}");
+        assert!(!env.contains("APP_VERSION='dev'"), "{env}");
+
+        // The port is held by this install's own app (a reinstall): it goes on, and
+        // its own containers do not block it.
+        std::fs::write(dir.join("port.out"), format!("127.0.0.1:{port}\n")).unwrap();
+        std::fs::write(dir.join("ps.out"), "0123456789ab\n").unwrap();
+        let out = run();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(dir.join("seen")).unwrap(), "installer\n");
+        drop(busy);
+
+        // A free port.
+        std::fs::remove_file(dir.join("port.out")).unwrap();
+        std::fs::remove_file(dir.join("seen")).unwrap();
+        let out = run();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(std::fs::read_to_string(dir.join("seen")).unwrap(), "installer\n");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
     #[test]
     fn default_stop_lets_databases_shut_down() {
         let catalog = Catalog::parse(EMBEDDED).unwrap();
