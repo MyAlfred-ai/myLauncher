@@ -49,7 +49,8 @@ const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 /** Same rules as the backend, to show errors before submitting. */
 export function validateField(f: FieldDef, values: Record<string, string>): string | null {
   if (!isActive(f, values)) return null;
-  const raw = (values[f.key] ?? "").trim();
+  // String(): an input bound to a number would otherwise crash the whole form.
+  const raw = String(values[f.key] ?? "").trim();
   const v = raw || f.default || "";
   if (!v) return f.required ? "Obligatoire" : null;
   if (/[\r\n]/.test(v)) return "Une seule ligne";

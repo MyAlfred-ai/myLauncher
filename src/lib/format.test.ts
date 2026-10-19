@@ -53,6 +53,13 @@ describe("form fields", () => {
     expect(validateField(email, { MAIL: "a@b.fr" })).toBeNull();
     expect(validateField(pwd, { PWD: "court" })).toBe("Au moins 8 caractères");
   });
+
+  it("accepts a port typed as a number", () => {
+    const port: FieldDef = { key: "PORT", label: "Port", kind: "number", required: true, default: "8080" };
+    const typed = { PORT: 8081 } as unknown as Record<string, string>;
+    expect(validateField(port, typed)).toBeNull();
+    expect(validateField(port, { PORT: "80a" })).toBe("Nombre attendu");
+  });
 });
 
 describe("appStatus", () => {

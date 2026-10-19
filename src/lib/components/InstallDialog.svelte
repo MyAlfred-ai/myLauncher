@@ -228,7 +228,8 @@
               class="input"
               class:mono={f.kind === "number" || f.kind === "url"}
               class:invalid={touched && errors[f.key]}
-              type={f.kind === "email" ? "email" : f.kind === "number" ? "number" : f.kind === "url" ? "url" : "text"}
+              type={f.kind === "email" ? "email" : f.kind === "url" ? "url" : "text"}
+              inputmode={f.kind === "number" ? "numeric" : undefined}
               bind:value={values[f.key]}
               placeholder={f.placeholder ?? f.default ?? ""}
               autocapitalize="off"

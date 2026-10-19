@@ -272,12 +272,14 @@ fn default_steps(action: Action) -> Vec<Step> {
         label: label.into(),
         run: run.into(),
     };
+    // An explicit timeout: Docker Desktop can give containers 1 s before
+    // SIGKILL, which cuts a database off in the middle of its shutdown.
     match action {
         Action::Start => vec![step("Démarrage", "ml_compose up -d")],
-        Action::Stop => vec![step("Arrêt", "ml_compose stop")],
+        Action::Stop => vec![step("Arrêt", "ml_compose stop --timeout 60")],
         Action::Remove => vec![step(
             "Arrêt et suppression des conteneurs (les données sont conservées)",
-            "ml_compose down --remove-orphans",
+            "ml_compose down --remove-orphans --timeout 60",
         )],
         _ => vec![],
     }
@@ -555,6 +557,100 @@ mod tests {
         assert!(String::from_utf8_lossy(&out.stderr)
             .contains("::ml::error::Échec pendant « Étape test »"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Runs MIA's "Configuration et construction" step with a stub install.sh.
+    #[test]
+    fn mia_install_step_uses_its_own_image_and_a_free_port() {
+        if cfg!(windows) {
+            return;
+        }
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mia").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let step = &target.install[1];
+        let dir = std::env::temp_dir()
+            .join(format!("ml-test-{}", uuid::Uuid::new_v4()))
+            .join("Recette MIA");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("install.sh"),
+            "printf '%s %s %s\\n' \"$APP_IMAGE\" \"$APP_BIND\" \"$MIA_PORT\" > seen\n",
+        )
+        .unwrap();
+        let run = |port: u16| {
+            let mut values = BTreeMap::new();
+            values.insert("MIA_PORT".to_string(), port.to_string());
+            let dir_s = dir.to_string_lossy().into_owned();
+            let plan = Plan {
+                app,
+                target,
+                action: Action::Install,
+                dir: &dir_s,
+                values: &values,
+                git_ref: ("branch", "main"),
+                token: None,
+                windows: false,
+            };
+            let script = format!(
+                "{{\n{PRELUDE}{}cd \"$ML_WORK\"\n{}\n}} < /dev/null\n",
+                context_block(&plan),
+                step.run
+            );
+            run_bash(&script, &dir)
+        };
+
+        // A port held by another program (even one lsof cannot see) is refused.
+        let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = busy.local_addr().unwrap().port();
+        let out = run(port);
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr)
+            .contains(&format!("::ml::error::Le port {port} est déjà utilisé")));
+        assert!(!dir.join("seen").exists());
+        drop(busy);
+
+        // A free port: install.sh builds an image named after the folder, bound to localhost.
+        let out = run(port);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("seen")).unwrap(),
+            format!("myalfred-recette-mia:latest 127.0.0.1 {port}\n")
+        );
+
+        // A reinstall keeps the image recorded in .env.
+        std::fs::write(dir.join(".env"), "APP_IMAGE=mia-prod:latest\n").unwrap();
+        let out = run(port);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(std::fs::read_to_string(dir.join("seen"))
+            .unwrap()
+            .starts_with("mia-prod:latest "));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn default_stop_lets_databases_shut_down() {
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mia").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let values = BTreeMap::new();
+        for (action, cmd) in [
+            (Action::Stop, "ml_compose stop --timeout 60\n"),
+            (Action::Restart, "ml_compose stop --timeout 60\n"),
+            (Action::Remove, "ml_compose down --remove-orphans --timeout 60\n"),
+        ] {
+            let script = build(&Plan {
+                app,
+                target,
+                action,
+                dir: "~/MyAlfred/mia",
+                values: &values,
+                git_ref: ("branch", "main"),
+                token: None,
+                windows: false,
+            });
+            assert!(script.contains(cmd), "{action:?}");
+        }
     }
 
     #[test]

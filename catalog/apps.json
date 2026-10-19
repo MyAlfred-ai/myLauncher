@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-18",
+  "updated": "2026-10-19",
   "apps": [
     {
       "id": "mia",
@@ -37,8 +37,8 @@
           ],
           "install": [
             { "label": "Récupération du code", "run": "@sync" },
-            { "label": "Configuration et construction", "run": "export MIA_MODE=standalone MIA_PORT MIA_URL=\"http://localhost:${MIA_PORT}\" MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
-            { "label": "Réglages du poste", "run": "ml_dotenv APP_BIND 127.0.0.1\nml_dotenv MIA_WORKERS 2\nml_compose up -d" },
+            { "label": "Configuration et construction", "run": "APP_IMAGE=\"$(ml_dotenv_get APP_IMAGE)\"\n[ -n \"$APP_IMAGE\" ] || APP_IMAGE=\"myalfred-$(printf '%s' \"${PWD##*/}\" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_.-' '-'):latest\"\nexport APP_IMAGE APP_BIND=127.0.0.1 MIA_MODE=standalone MIA_PORT MIA_URL=\"http://localhost:${MIA_PORT}\" MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD\nif (: < \"/dev/tcp/127.0.0.1/$MIA_PORT\") 2>/dev/null && ! { [ -f .env ] && ml_compose port app 80 2>/dev/null | grep -q \":$MIA_PORT\\$\"; }; then\n  ml_fail \"Le port $MIA_PORT est déjà utilisé sur ce poste. Relancez l'installation avec un autre port local (8081, par exemple).\"\nfi\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
+            { "label": "Réglages du poste", "run": "ml_dotenv APP_IMAGE \"$APP_IMAGE\"\nml_dotenv APP_BIND 127.0.0.1\nml_dotenv MIA_WORKERS 2\nml_compose up -d" },
             { "label": "Vérification", "run": "ml_wait 300 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas. Consultez le journal ci-dessus.\"" }
           ],
           "update": [
@@ -73,8 +73,8 @@
           ],
           "install": [
             { "label": "Récupération du code", "run": "@sync" },
-            { "label": "Configuration et construction", "run": "MIA_DOMAIN=\"${MIA_URL#*://}\"; MIA_DOMAIN=\"${MIA_DOMAIN%%/*}\"\nexport MIA_MODE MIA_URL MIA_DOMAIN MIA_PORT MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD TRAEFIK_NETWORK\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
-            { "label": "Réglages du serveur", "run": "if [ \"$MIA_MODE\" = traefik ]; then ml_dotenv TRAEFIK_NETWORK \"$TRAEFIK_NETWORK\"; ml_dotenv TRAEFIK_CERTRESOLVER \"$TRAEFIK_CERTRESOLVER\"; fi\nml_dotenv MIA_WORKERS \"${MIA_WORKERS:-4}\"\nml_compose up -d" },
+            { "label": "Configuration et construction", "run": "MIA_DOMAIN=\"${MIA_URL#*://}\"; MIA_DOMAIN=\"${MIA_DOMAIN%%/*}\"\nAPP_IMAGE=\"$(ml_dotenv_get APP_IMAGE)\"\n[ -n \"$APP_IMAGE\" ] || APP_IMAGE=\"myalfred-$(printf '%s' \"${PWD##*/}\" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_.-' '-'):latest\"\nexport APP_IMAGE MIA_MODE MIA_URL MIA_DOMAIN MIA_PORT MIA_ADMIN_EMAIL MIA_ADMIN_NAME MIA_ADMIN_PASSWORD TRAEFIK_NETWORK\nif [ \"$MIA_MODE\" != traefik ] && (: < \"/dev/tcp/127.0.0.1/$MIA_PORT\") 2>/dev/null && ! { [ -f .env ] && ml_compose port app 80 2>/dev/null | grep -q \":$MIA_PORT\\$\"; }; then\n  ml_fail \"Le port $MIA_PORT est déjà utilisé sur le serveur. Relancez l'installation avec un autre port.\"\nfi\nif [ -f .env ]; then bash ./install.sh --non-interactive --force; else bash ./install.sh --non-interactive; fi" },
+            { "label": "Réglages du serveur", "run": "ml_dotenv APP_IMAGE \"$APP_IMAGE\"\nif [ \"$MIA_MODE\" = traefik ]; then ml_dotenv TRAEFIK_NETWORK \"$TRAEFIK_NETWORK\"; ml_dotenv TRAEFIK_CERTRESOLVER \"$TRAEFIK_CERTRESOLVER\"; fi\nml_dotenv MIA_WORKERS \"${MIA_WORKERS:-4}\"\nml_compose up -d" },
             { "label": "Vérification", "run": "ml_wait 300 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas. Consultez le journal ci-dessus.\"" }
           ],
           "update": [
