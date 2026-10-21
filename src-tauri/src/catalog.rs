@@ -168,6 +168,12 @@ pub struct TargetDef {
     /// Rough duration of a first install, shown to the user.
     #[serde(default)]
     pub duration: Option<String>,
+    /// Memory Docker should have, checked before installing (warning only).
+    #[serde(default)]
+    pub min_memory_gb: Option<f64>,
+    /// Free disk space needed for images and data.
+    #[serde(default)]
+    pub min_disk_gb: Option<f64>,
     #[serde(default)]
     pub fields: Vec<FieldDef>,
     pub install: Vec<Step>,
@@ -290,7 +296,11 @@ impl Catalog {
             // A remote catalog can change these links: only web pages are opened.
             for link in app.services.iter().flat_map(|s| &s.links) {
                 if !link.url.starts_with("https://") {
-                    bail!("Catalogue : lien non sécurisé pour {} ({}).", app.id, link.url);
+                    bail!(
+                        "Catalogue : lien non sécurisé pour {} ({}).",
+                        app.id,
+                        link.url
+                    );
                 }
             }
             if !id_re.is_match(&app.id) || !ids.insert(app.id.clone()) {
@@ -360,8 +370,14 @@ mod tests {
         // MIA and myBrief need an AI key; Google / Microsoft stay optional.
         for id in ["mia", "mybrief"] {
             let s = &c.app(id).unwrap().services;
-            assert!(s.iter().any(|n| n.level == NeedLevel::Required), "{id}: clé IA");
-            assert!(s.iter().any(|n| n.level == NeedLevel::Optional), "{id}: Google/Microsoft");
+            assert!(
+                s.iter().any(|n| n.level == NeedLevel::Required),
+                "{id}: clé IA"
+            );
+            assert!(
+                s.iter().any(|n| n.level == NeedLevel::Optional),
+                "{id}: Google/Microsoft"
+            );
         }
         for app in &c.apps {
             let local = app.targets.local.as_ref().expect("local target");

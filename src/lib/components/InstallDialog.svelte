@@ -5,7 +5,7 @@
   import type { HostCheck, TargetDef } from "../types";
   import Icon from "./Icon.svelte";
   import Modal from "./Modal.svelte";
-  import HostStatus from "./HostStatus.svelte";
+  import DockerCheck from "./DockerCheck.svelte";
   import ServerOffer from "./ServerOffer.svelte";
   import ServiceNeeds from "./ServiceNeeds.svelte";
 
@@ -16,7 +16,6 @@
 
   let step = $state<1 | 2>(1);
   let check = $state<HostCheck | null>(null);
-  let checking = $state(false);
   let dir = $state("");
   let values = $state<Record<string, string>>({});
   let reveal = $state<Record<string, boolean>>({});
@@ -28,28 +27,13 @@
   const fields = $derived((tdef?.fields ?? []).filter((f) => isActive(f, values)));
   const errors = $derived(Object.fromEntries(fields.map((f) => [f.key, validateField(f, values)])));
   const hasErrors = $derived(Object.values(errors).some(Boolean));
-  const ready = $derived(!!check?.reachable && !!check.docker && !!check.compose && check.daemon && !!check.git);
+  // Git is not needed any more: the launcher fetches the code itself.
+  const ready = $derived(!!check?.reachable && !!check.docker && !!check.compose && check.daemon);
   const alreadyThere = $derived(installs.some((i) => i.state !== "failed"));
 
   function close() {
     launcher.installing = null;
   }
-
-  async function runCheck() {
-    checking = true;
-    check = null;
-    try {
-      check = await api.checkHost();
-    } catch (e) {
-      check = { reachable: false, os: "", git: "", docker: "", compose: "", daemon: false, error: String(e) };
-    } finally {
-      checking = false;
-    }
-  }
-
-  $effect(() => {
-    if (step === 1) runCheck();
-  });
 
   async function next() {
     if (!tdef) return;
@@ -113,11 +97,8 @@
     </div>
 
     <div class="check">
-      <div class="check-head">
-        <span class="label">Vérification du poste</span>
-        <button class="btn ghost sm" onclick={runCheck} disabled={checking}><Icon name="refresh" size={14} /> Vérifier à nouveau</button>
-      </div>
-      <HostStatus {check} loading={checking} />
+      <span class="label">Vérification du poste</span>
+      <DockerCheck bind:check target={tdef} appName={app.name} />
     </div>
 
     {#if !tdef}
@@ -287,11 +268,6 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-  }
-  .check-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
   }
   .check + .callout {
     margin-top: 12px;

@@ -1,8 +1,10 @@
 mod catalog;
 mod commands;
+mod docker;
 mod error;
 mod exec;
 mod github;
+mod gitsync;
 mod ops;
 mod script;
 mod secrets;
@@ -17,6 +19,17 @@ use tauri::Manager;
 /// usual locations of docker and git so they are found.
 fn extend_path() {
     if cfg!(windows) {
+        // A Docker Desktop installed while the launcher runs is not yet in
+        // the PATH this process inherited.
+        let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+        let docker_bin = format!(r"{pf}\Docker\Docker\resources\bin");
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current
+            .split(';')
+            .any(|p| p.eq_ignore_ascii_case(&docker_bin))
+        {
+            std::env::set_var("PATH", format!("{current};{docker_bin}"));
+        }
         return;
     }
     let home = std::env::var("HOME").unwrap_or_default();
@@ -25,6 +38,9 @@ fn extend_path() {
         "/opt/homebrew/bin".to_string(),
         "/Applications/Docker.app/Contents/Resources/bin".to_string(),
         format!("{home}/.docker/bin"),
+        // Rancher Desktop and OrbStack put their docker CLI here.
+        format!("{home}/.rd/bin"),
+        format!("{home}/.orbstack/bin"),
         "/usr/bin".to_string(),
         "/bin".to_string(),
         "/usr/sbin".to_string(),
@@ -69,6 +85,9 @@ pub fn run() {
             commands::set_github_token,
             commands::clear_github_token,
             commands::check_host,
+            commands::docker_start,
+            commands::docker_install,
+            commands::docker_install_cancel,
             commands::default_install_dir,
             commands::install_app,
             commands::run_action,

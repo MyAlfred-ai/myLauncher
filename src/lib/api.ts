@@ -41,6 +41,9 @@ export const api = {
   setGithubToken: (token: string) => call<TokenStatus>("set_github_token", { token }),
   clearGithubToken: () => call<void>("clear_github_token"),
   checkHost: () => call<HostCheck>("check_host"),
+  dockerStart: () => call<HostCheck>("docker_start"),
+  dockerInstall: () => call<HostCheck>("docker_install"),
+  dockerInstallCancel: () => call<void>("docker_install_cancel"),
   defaultInstallDir: (appId: string) => call<string>("default_install_dir", { appId }),
   install: (req: { appId: string; dir: string; values: Record<string, string> }) =>
     call<string>("install_app", { req }),

@@ -12,6 +12,8 @@ pub enum Error {
     Http(#[from] reqwest::Error),
     #[error("Erreur interne : {0}")]
     Tauri(#[from] tauri::Error),
+    #[error("Erreur Git : {0}")]
+    Git(#[from] git2::Error),
 }
 
 impl Error {

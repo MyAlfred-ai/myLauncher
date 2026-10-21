@@ -1,6 +1,7 @@
 //! Commands called by the interface.
 
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -8,12 +9,13 @@ use tauri::{AppHandle, Emitter};
 
 use crate::catalog::{AppDef, Catalog, FieldKind, TargetDef, VersionSource};
 use crate::error::{bail, Error, Result};
-use crate::exec;
 use crate::github::Gh;
+use crate::gitsync::Source;
 use crate::ops::{self, LogLine, OpInfo, OpRequest};
 use crate::script::{self, Action, Plan};
 use crate::state::{now, state, LatestState, LauncherUpdateState};
 use crate::store::{check_dir, InstallState, Installation, Settings};
+use crate::{docker, exec};
 use crate::{secrets, updates, version};
 
 #[derive(Serialize)]
@@ -210,12 +212,29 @@ pub struct HostCheck {
     pub docker: String,
     pub compose: String,
     pub daemon: bool,
+    /// Desktop app providing Docker (Docker Desktop, OrbStack…), even when
+    /// its command-line tools are not found yet.
+    pub docker_app: Option<String>,
+    /// Docker Desktop can be installed by the launcher on this system.
+    pub can_install_docker: bool,
+    /// Memory of Docker's virtual machine, in bytes (0 when unknown).
+    pub mem_total: u64,
+    /// Free space where applications are installed, in bytes (0 when unknown).
+    pub disk_free: u64,
+    pub engine: String,
     pub error: Option<String>,
 }
 
 #[tauri::command]
-pub async fn check_host() -> Result<HostCheck> {
-    let cap = match exec::run_capture(script::HOST_CHECK, Duration::from_secs(30)).await {
+pub async fn check_host(app: AppHandle) -> Result<HostCheck> {
+    let base = state(&app).settings.read().unwrap().install_dir.clone();
+    let docker_app = docker::desktop_apps()
+        .into_iter()
+        .next()
+        .map(|(n, _)| n.to_string());
+    let can_install_docker = docker::installer().is_some();
+    let script = script::host_check_script(&script_dir(&base));
+    let cap = match exec::run_capture(&script, Duration::from_secs(40)).await {
         Ok(c) => c,
         Err(e) => {
             return Ok(HostCheck {
@@ -239,8 +258,36 @@ pub async fn check_host() -> Result<HostCheck> {
         docker: get("docker"),
         compose: get("compose"),
         daemon: get("daemon") == "ok",
+        docker_app,
+        can_install_docker,
+        mem_total: get("memtotal").parse().unwrap_or(0),
+        disk_free: get("diskfree")
+            .parse::<u64>()
+            .map(|kb| kb * 1024)
+            .unwrap_or(0),
+        engine: get("engine"),
         error: None,
     })
+}
+
+/// Starts Docker's desktop app and waits for it, then checks again.
+#[tauri::command]
+pub async fn docker_start(app: AppHandle) -> Result<HostCheck> {
+    docker::start().await?;
+    check_host(app).await
+}
+
+/// Downloads and installs Docker Desktop (the user confirms in the system's
+/// administrator dialog), then starts it. Progress: `docker-setup` events.
+#[tauri::command]
+pub async fn docker_install(app: AppHandle) -> Result<HostCheck> {
+    docker::install(&app).await?;
+    check_host(app).await
+}
+
+#[tauri::command]
+pub fn docker_install_cancel() {
+    docker::cancel_install();
 }
 
 fn find_app(catalog: &Catalog, id: &str) -> Result<AppDef> {
@@ -422,7 +469,7 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
     let git_ref = latest_ref(&app, &def);
     let token = st.token();
     let sdir = script_dir(&dir);
-    let script = script::build(&Plan {
+    let phases = script::build_phases(&Plan {
         app: &def,
         target: &tdef,
         action: Action::Install,
@@ -438,12 +485,23 @@ pub fn install_app(app: AppHandle, req: InstallRequest) -> Result<String> {
             installation_id: id,
             app_id: def.id.clone(),
             action: Action::Install,
-            script,
+            dir: PathBuf::from(&dir),
+            source: code_source(&def, &git_ref, token),
+            phases,
             steps: script::step_labels(&tdef, Action::Install),
         },
     );
     let _ = app.emit("overview-changed", ());
     op
+}
+
+fn code_source(def: &AppDef, git_ref: &(String, String), token: Option<String>) -> Source {
+    Source {
+        url: def.repo.clone_url(),
+        ref_kind: git_ref.0.clone(),
+        ref_name: git_ref.1.clone(),
+        token,
+    }
 }
 
 /// Tag of the latest release when the app publishes tags, else its branch.
@@ -473,7 +531,7 @@ pub fn start_action(app: &AppHandle, installation_id: &str, action: Action) -> R
     let git_ref = latest_ref(app, &def);
     let token = st.token();
     let sdir = script_dir(&inst.dir);
-    let script = script::build(&Plan {
+    let phases = script::build_phases(&Plan {
         app: &def,
         target: &tdef,
         action,
@@ -489,7 +547,9 @@ pub fn start_action(app: &AppHandle, installation_id: &str, action: Action) -> R
             installation_id: inst.id.clone(),
             app_id: def.id.clone(),
             action,
-            script,
+            dir: PathBuf::from(&inst.dir),
+            source: code_source(&def, &git_ref, token),
+            phases,
             steps: script::step_labels(&tdef, action),
         },
     )

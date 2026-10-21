@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -13,7 +15,8 @@ use tokio::sync::Notify;
 
 use crate::error::{bail, Result};
 use crate::exec::{self, Stream};
-use crate::script::Action;
+use crate::gitsync::{self, Source};
+use crate::script::{sh_quote, Action, Phase, COMMIT_SLOT};
 use crate::state::{now, state};
 use crate::store::InstallState;
 
@@ -51,7 +54,9 @@ pub struct LogLine {
 struct Entry {
     info: OpInfo,
     log: Vec<LogLine>,
+    /// Wakes a running script; the flag stops a code download.
     cancel: Arc<Notify>,
+    cancelled: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -93,6 +98,7 @@ impl OpManager {
     pub fn cancel(&self, op_id: &str) -> bool {
         match self.inner.lock().unwrap().get(op_id) {
             Some(e) if e.info.status == "running" => {
+                e.cancelled.store(true, Ordering::Relaxed);
                 e.cancel.notify_one();
                 true
             }
@@ -128,7 +134,10 @@ pub struct OpRequest {
     pub installation_id: String,
     pub app_id: String,
     pub action: Action,
-    pub script: String,
+    /// Install folder, where the code is fetched.
+    pub dir: PathBuf,
+    pub source: Source,
+    pub phases: Vec<Phase>,
     pub steps: Vec<String>,
 }
 
@@ -161,6 +170,7 @@ pub fn spawn(app: &AppHandle, req: OpRequest) -> Result<String> {
         ))
     };
     let cancel = Arc::new(Notify::new());
+    let cancelled = Arc::new(AtomicBool::new(false));
     let info = OpInfo {
         id: id.clone(),
         installation_id: req.installation_id.clone(),
@@ -181,6 +191,7 @@ pub fn spawn(app: &AppHandle, req: OpRequest) -> Result<String> {
             info: info.clone(),
             log: Vec::new(),
             cancel: cancel.clone(),
+            cancelled: cancelled.clone(),
         },
     );
     st.ops.prune();
@@ -189,9 +200,103 @@ pub fn spawn(app: &AppHandle, req: OpRequest) -> Result<String> {
     let app = app.clone();
     let op_id = id.clone();
     tauri::async_runtime::spawn(async move {
-        run(app, op_id, req, cancel, log_path).await;
+        run(app, op_id, req, cancel, cancelled, log_path).await;
     });
     Ok(id)
+}
+
+/// Collects an operation's output: log file, UI events, reported values.
+struct Sink {
+    app: AppHandle,
+    op_id: String,
+    file: Option<BufWriter<File>>,
+    pending: Arc<Mutex<Vec<LogLine>>>,
+    seq: u64,
+    results: BTreeMap<String, String>,
+    last_error: Option<String>,
+}
+
+impl Sink {
+    fn step(&mut self, step: &str) {
+        let st = state(&self.app);
+        if let Some(info) = st.ops.update(&self.op_id, |e| {
+            if let Some(i) = e.info.steps.iter().position(|s| s == step) {
+                e.info.current_step = i;
+            }
+        }) {
+            let _ = self.app.emit("op-state", &info);
+        }
+        self.push("step", step.to_string());
+    }
+
+    /// Interprets one line of script output (see the protocol in script.rs).
+    fn script_line(&mut self, stream: Stream, text: String) {
+        if let Some(step) = text.strip_prefix("::ml::step::") {
+            let step = step.to_string();
+            self.step(&step);
+        } else if let Some(kv) = text.strip_prefix("::ml::result::") {
+            if let Some((k, v)) = kv.split_once('=') {
+                self.results.insert(k.to_string(), v.trim().to_string());
+            }
+        } else if let Some(w) = text.strip_prefix("::ml::warn::") {
+            let w = w.to_string();
+            state(&self.app)
+                .ops
+                .update(&self.op_id, |e| e.info.warnings.push(w.clone()));
+            self.push("warn", w);
+        } else if let Some(e) = text.strip_prefix("::ml::error::") {
+            self.last_error = Some(e.to_string());
+            self.push("error", e.to_string());
+        } else {
+            self.push(if stream == Stream::Err { "err" } else { "out" }, text);
+        }
+    }
+
+    fn push(&mut self, kind: &str, text: String) {
+        if let Some(f) = self.file.as_mut() {
+            let _ = writeln!(f, "{text}");
+        }
+        self.seq += 1;
+        let line = LogLine {
+            op_id: self.op_id.clone(),
+            seq: self.seq,
+            kind: kind.into(),
+            text,
+        };
+        state(&self.app).ops.update(&self.op_id, |e| {
+            if e.log.len() >= MAX_LINES {
+                e.log.drain(..MAX_LINES / 10);
+            }
+            e.log.push(line.clone());
+        });
+        self.pending.lock().unwrap().push(line);
+    }
+}
+
+/// Fetches the code in a worker thread, streaming its progress messages.
+async fn run_sync(
+    sink: &mut Sink,
+    dir: PathBuf,
+    source: Source,
+    cancelled: Arc<AtomicBool>,
+) -> Result<String> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let mut job = tokio::task::spawn_blocking(move || {
+        gitsync::sync(&dir, &source, &cancelled, |m| {
+            let _ = tx.send(m);
+        })
+    });
+    loop {
+        tokio::select! {
+            Some(m) = rx.recv() => sink.push("out", m),
+            res = &mut job => {
+                while let Ok(m) = rx.try_recv() {
+                    sink.push("out", m);
+                }
+                return res.map_err(|e| crate::error::Error::msg(format!("Récupération du code interrompue : {e}")))?;
+            }
+        }
+    }
 }
 
 async fn run(
@@ -199,6 +304,7 @@ async fn run(
     op_id: String,
     req: OpRequest,
     cancel: Arc<Notify>,
+    cancelled: Arc<AtomicBool>,
     log_path: std::path::PathBuf,
 ) {
     let pending: Arc<Mutex<Vec<LogLine>>> = Arc::default();
@@ -228,56 +334,69 @@ async fn run(
         })
     };
 
-    let mut results: BTreeMap<String, String> = BTreeMap::new();
-    let mut last_error: Option<String> = None;
-    let mut seq: u64 = 0;
-    let st = state(&app);
+    let mut sink = Sink {
+        app: app.clone(),
+        op_id: op_id.clone(),
+        file,
+        pending: pending.clone(),
+        seq: 0,
+        results: BTreeMap::new(),
+        last_error: None,
+    };
 
-    let outcome = exec::run_streaming(&req.script, cancel, |stream, text| {
-        let (kind, shown) = if let Some(step) = text.strip_prefix("::ml::step::") {
-            let step = step.to_string();
-            if let Some(info) = st.ops.update(&op_id, |e| {
-                if let Some(i) = e.info.steps.iter().position(|s| *s == step) {
-                    e.info.current_step = i;
-                }
-            }) {
-                let _ = app.emit("op-state", &info);
-            }
-            ("step", step)
-        } else if let Some(kv) = text.strip_prefix("::ml::result::") {
-            if let Some((k, v)) = kv.split_once('=') {
-                results.insert(k.to_string(), v.trim().to_string());
-            }
-            return;
-        } else if let Some(w) = text.strip_prefix("::ml::warn::") {
-            let w = w.to_string();
-            st.ops.update(&op_id, |e| e.info.warnings.push(w.clone()));
-            ("warn", w)
-        } else if let Some(e) = text.strip_prefix("::ml::error::") {
-            last_error = Some(e.to_string());
-            ("error", e.to_string())
-        } else {
-            (if stream == Stream::Err { "err" } else { "out" }, text)
-        };
-        if let Some(f) = file.as_mut() {
-            let _ = writeln!(f, "{shown}");
+    // Docker Desktop is often simply not started: start it instead of failing.
+    crate::docker::ensure_running(|m| sink.push("out", m)).await;
+
+    // Commit checked out now; updated after each fetch of the code.
+    let dir = req.dir.clone();
+    let mut commit = tokio::task::spawn_blocking(move || gitsync::head_commit(&dir))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let mut outcome: Result<Option<i32>> = Ok(Some(0));
+    for phase in &req.phases {
+        if cancelled.load(Ordering::Relaxed) {
+            outcome = Ok(None);
+            break;
         }
-        seq += 1;
-        let line = LogLine {
-            op_id: op_id.clone(),
-            seq,
-            kind: kind.into(),
-            text: shown,
-        };
-        st.ops.update(&op_id, |e| {
-            if e.log.len() >= MAX_LINES {
-                e.log.drain(..MAX_LINES / 10);
+        outcome = match phase {
+            Phase::Script(script) => {
+                let script = script.replace(COMMIT_SLOT, &sh_quote(&commit));
+                exec::run_streaming(&script, cancel.clone(), |stream, text| {
+                    sink.script_line(stream, text)
+                })
+                .await
             }
-            e.log.push(line.clone());
-        });
-        pending.lock().unwrap().push(line);
-    })
-    .await;
+            Phase::Sync { label } => {
+                sink.step(label);
+                match run_sync(
+                    &mut sink,
+                    req.dir.clone(),
+                    req.source.clone(),
+                    cancelled.clone(),
+                )
+                .await
+                {
+                    Ok(c) => {
+                        commit = c;
+                        sink.results.insert("commit".into(), commit.clone());
+                        Ok(Some(0))
+                    }
+                    Err(_) if cancelled.load(Ordering::Relaxed) => Ok(None),
+                    Err(e) => {
+                        sink.last_error = Some(e.to_string());
+                        sink.push("error", e.to_string());
+                        Ok(Some(1))
+                    }
+                }
+            }
+        };
+        if !matches!(outcome, Ok(Some(0))) {
+            break;
+        }
+    }
 
     tokio::time::sleep(Duration::from_millis(250)).await;
     flusher.abort();
@@ -285,14 +404,14 @@ async fn run(
     if !rest.is_empty() {
         let _ = app.emit("op-log", &rest);
     }
-    if let Some(mut f) = file {
+    if let Some(mut f) = sink.file.take() {
         let _ = f.flush();
     }
 
     let (status, error) = match outcome {
         Ok(Some(0)) => ("success", None),
         Ok(Some(code)) => {
-            let msg = last_error.unwrap_or_else(|| {
+            let msg = sink.last_error.clone().unwrap_or_else(|| {
                 format!("L'opération a échoué (code {code}). Consultez le journal.")
             });
             ("failed", Some(msg))
@@ -301,6 +420,7 @@ async fn run(
         Err(e) => ("failed", Some(e.to_string())),
     };
 
+    let st = state(&app);
     let info = st.ops.update(&op_id, |e| {
         e.info.status = status.into();
         e.info.error = error.clone();
@@ -309,7 +429,7 @@ async fn run(
             e.info.current_step = e.info.steps.len();
         }
     });
-    apply_outcome(&app, &req, status, &results);
+    apply_outcome(&app, &req, status, &sink.results);
     if let Some(info) = info {
         let _ = app.emit("op-state", &info);
         crate::updates::notify_op(&app, &info);

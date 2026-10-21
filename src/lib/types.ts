@@ -27,6 +27,8 @@ export interface TargetDef {
   workdir?: string | null;
   url: string;
   duration?: string | null;
+  minMemoryGb?: number | null;
+  minDiskGb?: number | null;
   fields: FieldDef[];
   install: Step[];
   update: Step[];
@@ -167,7 +169,20 @@ export interface HostCheck {
   docker: string;
   compose: string;
   daemon: boolean;
+  /** Desktop app providing Docker (Docker Desktop, OrbStack…), even if its CLI is not found yet. */
+  dockerApp: string | null;
+  canInstallDocker: boolean;
+  /** Bytes; 0 when unknown. */
+  memTotal: number;
+  diskFree: number;
+  engine: string;
   error: string | null;
+}
+
+export interface DockerSetupProgress {
+  phase: "download" | "verify" | "install" | "start" | "done";
+  received: number;
+  total: number;
 }
 
 export interface ServiceStatus {

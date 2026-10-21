@@ -10,8 +10,11 @@ toute une équipe, est proposée par MyAlfred.ai (page « Infos & contact » du 
 ## Ce que fait le launcher
 
 - **Catalogue des 4 applications** : présentation, prérequis, dernière version publiée, nouveautés.
-- **Installation guidée sur ce poste** : vérification de Docker, Compose et Git, formulaire de configuration propre à chaque application, suivi en direct
-  (étapes et journal détaillé).
+- **Installation guidée sur ce poste** : seul Docker est nécessaire. S'il manque, le launcher
+  télécharge Docker Desktop depuis le site officiel, vérifie sa signature et l'installe (un mot de
+  passe administrateur, après acceptation de la licence Docker) ; s'il est arrêté, il le démarre.
+  Mémoire de Docker et espace disque sont vérifiés. Puis formulaire de configuration propre à
+  chaque application et suivi en direct (étapes et journal détaillé).
 - **Mises à jour** : vérification au démarrage puis à intervalle régulier, notification système,
   « Tout mettre à jour », mises à jour automatiques activables par installation. Une sauvegarde
   est faite avant quand l'application le prévoit.
@@ -35,7 +38,8 @@ scripts (`install.sh`, `./mytrix installer`…), comme le ferait un administrate
 Interface (Svelte 5)  ──invoke──▶  Cœur Rust (Tauri 2)
                                      ├─ catalog/apps.json : description de chaque application
                                      ├─ GitHub API : versions, nouveautés, catalogue à jour
-                                     └─ script bash généré ──▶ bash -s (ce poste)
+                                     ├─ Git intégré (libgit2) : code des applications
+                                     └─ scripts bash générés ──▶ bash -s (ce poste)
 ```
 
 - **Catalogue** ([catalog/apps.json](catalog/apps.json)) : dépôt, source de la version, champs du
@@ -44,8 +48,13 @@ Interface (Svelte 5)  ──invoke──▶  Cœur Rust (Tauri 2)
   On peut donc corriger une procédure sans republier le launcher.
 - **Versions** : selon l'application, dernière release, plus haut tag, fichier `VERSION` /
   `src/version.json`, ou dernier commit de `main`.
-- **Exécution** : le script est envoyé sur l'entrée standard de `bash` ; les secrets n'apparaissent
-  jamais dans une ligne de commande.
+- **Exécution** : une opération enchaîne des scripts bash et la récupération du code (étapes `@sync`
+  du catalogue), faite par le Git intégré au launcher : `git` n'a pas à être installé sur le poste.
+  Les scripts sont envoyés sur l'entrée standard de `bash` ; les secrets n'apparaissent jamais dans
+  une ligne de commande. Si `git` est absent, `git rev-parse HEAD` (utilisé par certains scripts
+  des applications) répond avec le commit connu du launcher (`$ML_COMMIT`).
+- **Docker** : avant chaque opération, Docker Desktop (ou OrbStack, Rancher Desktop, Podman
+  Desktop) est démarré s'il ne répond pas.
 
 ### Format d'une étape
 
@@ -106,8 +115,12 @@ clé en a un). La clé privée de signature n'est **pas** dans le dépôt ; la c
 
 - Le token GitHub est rangé dans le trousseau du système (Keychain, Gestionnaire d'identifiants
   Windows, Secret Service) et n'est envoyé qu'aux adresses GitHub.
-- Pour cloner, le token passe par des variables d'environnement Git : il n'est jamais écrit dans
-  `.git/config`.
+- Pour cloner, le token est remis au Git intégré seulement quand GitHub le demande : il n'est jamais
+  écrit dans `.git/config`.
+- L'installeur de Docker Desktop est téléchargé depuis desktop.docker.com et n'est exécuté
+  qu'après vérification de sa signature (équipe Apple `9BNSXJN65R` de Docker Inc. sur macOS,
+  signature Authenticode « Docker Inc » sur Windows), vérification refaite avec les droits
+  administrateur juste avant l'installation.
 - Les mots de passe saisis à l'installation ne sont pas conservés par le launcher ; ils vont
   seulement dans la configuration de l'application.
 - Désinstaller arrête et supprime les conteneurs mais garde volumes, `.env` et dossier.
@@ -119,7 +132,8 @@ HTTPS anonyme. La mise à jour du launcher fonctionne dès que les releases de c
 
 ## Limites connues
 
-- **Windows** : les scripts des applications sont en bash ; le launcher utilise Git for Windows
-  (Git Bash) avec Docker Desktop. À valider sur un vrai poste Windows.
+- **Windows** : les scripts des applications sont en bash ; le launcher utilise encore Git for
+  Windows (Git Bash) pour les exécuter, avec Docker Desktop. L'installation guidée de Docker et
+  le Git intégré sont à valider sur un vrai poste Windows.
 - **myBrief en local** : expérimental (ports 80/443, certificat auto-signé sur `https://localhost`).
 - **macOS** : sans signature Apple, le premier lancement demande un clic droit → Ouvrir.

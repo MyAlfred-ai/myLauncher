@@ -45,7 +45,7 @@
       "targets": {
         "local": {
           "url": "http://localhost:{{MIA_PORT}}",
-          "duration": "10 à 15 minutes",
+          "duration": "10 à 15 minutes", "minMemoryGb": 3, "minDiskGb": 6,
           "notes": [
             "L'image est construite sur votre poste : comptez une dizaine de minutes la première fois.",
             "Clé d'IA indispensable : après l'installation, ajoutez au moins une clé (Anthropic, Mistral, OpenAI…) ou une IA locale (Ollama / llama.cpp) dans MIA, Gestion LLMs → Clés API.",
@@ -114,7 +114,7 @@
           "experimental": true,
           "workdir": "install",
           "url": "https://localhost",
-          "duration": "5 minutes",
+          "duration": "5 minutes", "minMemoryGb": 2, "minDiskGb": 4,
           "notes": [
             "myBrief est conçu pour un serveur avec nom de domaine : l'installation locale sert à l'essayer.",
             "Clé API OpenAI indispensable pour la transcription et les comptes rendus (ci-dessous ou plus tard dans Administration → IA).",
@@ -232,12 +232,12 @@
           "install": [
             { "label": "Récupération du code", "run": "@sync" },
             { "label": "Configuration", "run": "[ -f .env ] || cp .env.example .env\n[ -f web/.env ] || cp web/.env.example web/.env\nchmod 600 .env web/.env\nml_dotenv COMPOSE_FILE docker-compose.yml:docker-compose.local.yml\nW=web/.env\nml_dotenv ORIGIN http://localhost:5173 \"$W\"\nml_dotenv MYBRAIN_ADMIN_EMAIL \"$MYBRAIN_ADMIN_EMAIL\" \"$W\"\nml_dotenv ALLOWED_EMAIL_DOMAIN \"${ALLOWED_EMAIL_DOMAIN:-${MYBRAIN_ADMIN_EMAIL#*@}}\" \"$W\"\nml_dotenv AUTH_GOOGLE_ID \"$AUTH_GOOGLE_ID\" \"$W\"\nml_dotenv AUTH_GOOGLE_SECRET \"$AUTH_GOOGLE_SECRET\" \"$W\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\" \"$W\"\n[ -z \"$ANTHROPIC_API_KEY\" ] || ml_dotenv ANTHROPIC_API_KEY \"$ANTHROPIC_API_KEY\" \"$W\"" },
-            { "label": "Construction et démarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
+            { "label": "Construction et démarrage", "run": "export BUILD_COMMIT=\"${ML_COMMIT:0:7}\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
             { "label": "Vérification", "run": "ml_wait 180 ml_http_ok http://localhost:5173/.well-known/oauth-protected-resource || ml_fail \"myBrain ne répond pas sur le port 5173.\"" }
           ],
           "update": [
             { "label": "Récupération de la nouvelle version", "run": "@sync" },
-            { "label": "Construction et redémarrage", "run": "export BUILD_COMMIT=\"$(git -C \"$ML_DIR\" rev-parse --short HEAD)\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
+            { "label": "Construction et redémarrage", "run": "export BUILD_COMMIT=\"${ML_COMMIT:0:7}\" BUILD_DATE=\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"\nbash ./install.sh docker --no-pull --no-hook" },
             { "label": "Vérification", "run": "ml_wait 180 ml_http_ok http://localhost:5173/.well-known/oauth-protected-resource || ml_fail \"myBrain ne répond pas après la mise à jour.\"" }
           ]
         }

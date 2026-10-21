@@ -16,7 +16,7 @@ use crate::catalog::{AppDef, DotenvQuote, Step, TargetDef, VersionSource};
 
 const PRELUDE: &str = r#"set -Eeuo pipefail
 umask 022
-export GIT_TERMINAL_PROMPT=0 DOCKER_CLI_HINTS=false
+export DOCKER_CLI_HINTS=false
 ML_STEP=""
 ml_step() { ML_STEP="$*"; printf '::ml::step::%s\n' "$*"; }
 ml_info() { printf '%s\n' "$*"; }
@@ -28,8 +28,20 @@ ml_rand_hex() { openssl rand -hex "$1" 2>/dev/null || od -An -N"$1" -tx1 /dev/ur
 ml_rand_b64() { { openssl rand -base64 "$1" 2>/dev/null || head -c "$1" /dev/urandom | base64; } | tr -d '\n'; }
 ml_compose() { docker compose "$@"; }
 ml_require() { command -v "$1" >/dev/null 2>&1 || ml_fail "$2"; }
+# The launcher fetches the code itself: git is optional on the machine. When
+# it is missing, the few read-only calls of the apps' scripts are answered
+# from what the launcher knows (exported, so child bash scripts see it).
+if ! command -v git >/dev/null 2>&1; then
+  git() {
+    case "$*" in
+      "rev-parse HEAD") printf '%s\n' "$ML_COMMIT";;
+      "rev-parse --short HEAD"|"rev-parse --short=7 HEAD") printf '%s\n' "${ML_COMMIT:0:7}";;
+      *) printf 'git est absent de ce poste : « git %s » ignoré.\n' "$*" >&2; return 1;;
+    esac
+  }
+  export -f git
+fi
 ml_check_prereqs() {
-  ml_require git "Git est introuvable sur la machine cible. Installez-le puis réessayez."
   ml_require docker "Docker est introuvable. Installez Docker Desktop (poste) ou Docker Engine (serveur)."
   docker compose version >/dev/null 2>&1 || ml_fail "Docker Compose v2 est introuvable (commande « docker compose »)."
   docker info >/dev/null 2>&1 || ml_fail "Docker ne répond pas. Démarrez Docker Desktop (ou le service docker), puis réessayez."
@@ -97,27 +109,6 @@ ml_pull() {
   ml_ghcr_login || ml_fail "Images inaccessibles. Ajoutez un token GitHub (droit read:packages) dans les réglages du launcher."
   ml_compose pull "$@"
 }
-ml_sync() {
-  if [ ! -d "$ML_DIR/.git" ]; then
-    if [ -d "$ML_DIR" ] && [ -n "$(ls -A "$ML_DIR" 2>/dev/null)" ]; then
-      ml_fail "Le dossier $ML_DIR existe déjà et ne contient pas l'application. Choisissez un autre dossier ou videz-le."
-    fi
-    mkdir -p "$ML_DIR"
-    ml_info "Clonage de $ML_REPO_URL…"
-    git -c core.autocrlf=false clone --no-checkout "$ML_REPO_URL" "$ML_DIR" \
-      || ml_fail "Téléchargement impossible. Dépôt privé ? Ajoutez un token GitHub dans les réglages du launcher."
-  fi
-  cd "$ML_DIR"
-  git config core.autocrlf false
-  if [ "$ML_REF_KIND" = tag ]; then
-    git fetch --force --tags origin
-    git -c advice.detachedHead=false checkout --force "refs/tags/$ML_REF"
-  else
-    git fetch origin "+refs/heads/$ML_REF:refs/remotes/origin/$ML_REF"
-    git checkout --force -B "$ML_REF" "refs/remotes/origin/$ML_REF"
-  fi
-  ml_info "Code à jour : $(git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)"
-}
 "#;
 
 /// What the script must do.
@@ -166,17 +157,56 @@ fn b64(s: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(s)
 }
 
-pub fn build(plan: &Plan) -> String {
+/// Replaced by the operation runner with the commit checked out at the time
+/// each script phase starts (it changes after a sync).
+pub const COMMIT_SLOT: &str = "@@ML_COMMIT@@";
+
+/// An operation is a sequence of bash scripts, with the code fetched by the
+/// launcher itself in between (`@sync` steps of the catalog).
+#[derive(Debug, Clone)]
+pub enum Phase {
+    Script(String),
+    Sync { label: String },
+}
+
+fn wrap(plan: &Plan, body: &str) -> String {
     let mut s = String::with_capacity(16 * 1024);
     // The whole script is one compound command: bash reads it entirely before
     // running it, so commands inside can never swallow the rest of stdin.
     s.push_str("{\n");
     s.push_str(PRELUDE);
     s.push_str(&context_block(plan));
-    s.push_str(&body(plan));
-    s.push_str("ml_report\n");
+    s.push_str(body);
     s.push_str("} < /dev/null\n");
     s
+}
+
+pub fn build_phases(plan: &Plan) -> Vec<Phase> {
+    let steps = steps_for(plan.target, plan.action);
+    let mut phases = Vec::new();
+    let mut body = String::from("ml_step 'Vérification des prérequis'\nml_check_prereqs\n");
+    if !matches!(plan.action, Action::Install) {
+        body.push_str(
+            "[ -d \"$ML_WORK\" ] || ml_fail \"Dossier d'installation introuvable : $ML_WORK\"\n",
+        );
+    }
+    for step in &steps {
+        if step.is_sync() {
+            phases.push(Phase::Script(wrap(plan, &body)));
+            phases.push(Phase::Sync {
+                label: step.label.clone(),
+            });
+            body.clear();
+        } else {
+            body.push_str(&format!("ml_step {}\n", sh_quote(&step.label)));
+            body.push_str("cd \"$ML_WORK\"\n");
+            body.push_str(step.run.trim_end());
+            body.push('\n');
+        }
+    }
+    body.push_str("ml_report\n");
+    phases.push(Phase::Script(wrap(plan, &body)));
+    phases
 }
 
 fn context_block(plan: &Plan) -> String {
@@ -205,26 +235,15 @@ fn context_block(plan: &Plan) -> String {
         // Compose files are listed with ':' in the apps' .env files.
         s.push_str("export COMPOSE_PATH_SEPARATOR=:\nexport MSYS_NO_PATHCONV=1\n");
     }
+    // Only used to log in to ghcr.io when images are private.
     match plan.token {
-        Some(t) if !t.is_empty() => {
-            let header = format!(
-                "AUTHORIZATION: basic {}",
-                b64(&format!("x-access-token:{t}"))
-            );
-            s.push_str(&format!(
-                "ML_GH_TOKEN=\"$(ml_b64d {})\"\n",
-                sh_quote(&b64(t))
-            ));
-            s.push_str(
-                "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader\n",
-            );
-            s.push_str(&format!(
-                "export GIT_CONFIG_VALUE_0=\"$(ml_b64d {})\"\n",
-                sh_quote(&b64(&header))
-            ));
-        }
+        Some(t) if !t.is_empty() => s.push_str(&format!(
+            "ML_GH_TOKEN=\"$(ml_b64d {})\"\n",
+            sh_quote(&b64(t))
+        )),
         _ => s.push_str("ML_GH_TOKEN=\"\"\n"),
     }
+    s.push_str(&format!("ML_COMMIT={COMMIT_SLOT}\nexport ML_COMMIT\n"));
     // Every field of the target is defined (empty when not given), so steps
     // can use them under `set -u`. They are shell variables, not exported:
     // a step exports what its own tools need.
@@ -258,12 +277,12 @@ fn report_fn(app: &AppDef) -> String {
             }
         }
         VersionSource::Tags | VersionSource::Releases => {
-            "git describe --tags --exact-match 2>/dev/null || git describe --tags --always".into()
+            "if [ \"$ML_REF_KIND\" = tag ]; then printf '%s' \"$ML_REF\"; else printf '%s' \"${ML_COMMIT:0:7}\"; fi".into()
         }
-        VersionSource::Commit => "git rev-parse --short=7 HEAD".into(),
+        VersionSource::Commit => "printf '%s' \"${ML_COMMIT:0:7}\"".into(),
     };
     format!(
-        "ml_report() {{\n  cd \"$ML_DIR\" 2>/dev/null || return 0\n  [ -d .git ] || return 0\n  printf '::ml::result::commit=%s\\n' \"$(git rev-parse HEAD 2>/dev/null || true)\"\n  printf '::ml::result::version=%s\\n' \"$({detect} 2>/dev/null || true)\"\n}}\n"
+        "ml_report() {{\n  [ -n \"$ML_COMMIT\" ] || return 0\n  cd \"$ML_DIR\" 2>/dev/null || return 0\n  printf '::ml::result::commit=%s\\n' \"$ML_COMMIT\"\n  printf '::ml::result::version=%s\\n' \"$({detect} 2>/dev/null || true)\"\n}}\n"
     )
 }
 
@@ -285,9 +304,10 @@ fn default_steps(action: Action) -> Vec<Step> {
     }
 }
 
-fn body(plan: &Plan) -> String {
-    let t = plan.target;
-    let mut steps: Vec<Step> = match plan.action {
+/// Steps of an action; install and update always fetch the code, even if a
+/// catalog forgets it.
+fn steps_for(t: &TargetDef, action: Action) -> Vec<Step> {
+    let mut steps: Vec<Step> = match action {
         Action::Install => t.install.clone(),
         Action::Update => t.update.clone(),
         Action::Start => non_empty(&t.start).unwrap_or_else(|| default_steps(Action::Start)),
@@ -299,8 +319,7 @@ fn body(plan: &Plan) -> String {
         }
         Action::Remove => default_steps(Action::Remove),
     };
-    // Install and update always fetch the code, even if a catalog forgets it.
-    if matches!(plan.action, Action::Install | Action::Update) && !steps.iter().any(Step::is_sync) {
+    if matches!(action, Action::Install | Action::Update) && !steps.iter().any(Step::is_sync) {
         steps.insert(
             0,
             Step {
@@ -309,25 +328,7 @@ fn body(plan: &Plan) -> String {
             },
         );
     }
-
-    let mut s = String::new();
-    s.push_str("ml_step 'Vérification des prérequis'\nml_check_prereqs\n");
-    if !matches!(plan.action, Action::Install) {
-        s.push_str(
-            "[ -d \"$ML_WORK\" ] || ml_fail \"Dossier d'installation introuvable : $ML_WORK\"\n",
-        );
-    }
-    for step in &steps {
-        s.push_str(&format!("ml_step {}\n", sh_quote(&step.label)));
-        if step.is_sync() {
-            s.push_str("ml_sync\n");
-        } else {
-            s.push_str("cd \"$ML_WORK\"\n");
-            s.push_str(step.run.trim_end());
-            s.push('\n');
-        }
-    }
-    s
+    steps
 }
 
 fn non_empty(v: &[Step]) -> Option<Vec<Step>> {
@@ -337,39 +338,37 @@ fn non_empty(v: &[Step]) -> Option<Vec<Step>> {
 /// Lists the step labels in order, for the progress display.
 pub fn step_labels(target: &TargetDef, action: Action) -> Vec<String> {
     let mut labels = vec!["Vérification des prérequis".to_string()];
-    let steps: Vec<Step> = match action {
-        Action::Install => target.install.clone(),
-        Action::Update => target.update.clone(),
-        Action::Start => non_empty(&target.start).unwrap_or_else(|| default_steps(Action::Start)),
-        Action::Stop => non_empty(&target.stop).unwrap_or_else(|| default_steps(Action::Stop)),
-        Action::Restart => {
-            let mut v = non_empty(&target.stop).unwrap_or_else(|| default_steps(Action::Stop));
-            v.extend(non_empty(&target.start).unwrap_or_else(|| default_steps(Action::Start)));
-            v
-        }
-        Action::Remove => default_steps(Action::Remove),
-    };
-    if matches!(action, Action::Install | Action::Update) && !steps.iter().any(Step::is_sync) {
-        labels.push("Récupération du code".into());
-    }
-    labels.extend(steps.into_iter().map(|s| s.label));
+    labels.extend(steps_for(target, action).into_iter().map(|s| s.label));
     labels
 }
 
-/// Probes a machine: tools, Docker daemon, OS. Read-only.
-pub const HOST_CHECK: &str = r#"{
-r() { printf '::ml::result::%s=%s\n' "$1" "$2"; }
+/// Probes this machine: Docker, its memory, free disk space where apps are
+/// installed (the nearest existing parent of `base`). Read-only.
+pub fn host_check_script(base: &str) -> String {
+    format!(
+        r#"{{
+r() {{ printf '::ml::result::%s=%s\n' "$1" "$2"; }}
 r os "$(uname -sm 2>/dev/null || echo inconnu)"
 if command -v git >/dev/null 2>&1; then r git "$(git --version 2>/dev/null)"; else r git ""; fi
 if command -v docker >/dev/null 2>&1; then
   r docker "$(docker --version 2>/dev/null)"
   r compose "$(docker compose version --short 2>/dev/null || true)"
-  if docker info >/dev/null 2>&1; then r daemon ok; else r daemon ""; fi
+  if docker info >/dev/null 2>&1; then
+    r daemon ok
+    r memtotal "$(docker info --format '{{{{.MemTotal}}}}' 2>/dev/null)"
+    r engine "$(docker info --format '{{{{.OperatingSystem}}}}' 2>/dev/null)"
+  else r daemon ""; fi
 else
   r docker ""; r compose ""; r daemon ""
 fi
-} < /dev/null
-"#;
+d={base}
+while [ ! -d "$d" ]; do p="$(dirname "$d")"; [ "$p" = "$d" ] && break; d="$p"; done
+r diskfree "$(df -Pk "$d" 2>/dev/null | awk 'NR==2 {{print $4}}')"
+}} < /dev/null
+"#,
+        base = shell_path(base)
+    )
+}
 
 /// Lists the containers of an installation, as JSON lines.
 pub fn status_script(dir: &str, workdir: Option<&str>, windows: bool) -> String {
@@ -411,6 +410,16 @@ mod tests {
         assert_eq!(shell_path("/opt/x y"), "'/opt/x y'");
     }
 
+    fn scripts(phases: &[Phase]) -> Vec<&str> {
+        phases
+            .iter()
+            .filter_map(|p| match p {
+                Phase::Script(s) => Some(s.as_str()),
+                Phase::Sync { .. } => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn secrets_are_never_in_clear() {
         let catalog = Catalog::parse(EMBEDDED).unwrap();
@@ -418,7 +427,7 @@ mod tests {
         let target = app.targets.local.as_ref().unwrap();
         let mut values = BTreeMap::new();
         values.insert("MIA_ADMIN_PASSWORD".to_string(), "S3cret!pass".to_string());
-        let script = build(&Plan {
+        let phases = build_phases(&Plan {
             app,
             target,
             action: Action::Install,
@@ -428,13 +437,16 @@ mod tests {
             token: Some("ghp_secretToken"),
             windows: false,
         });
-        assert!(!script.contains("S3cret!pass"));
-        assert!(!script.contains("ghp_secretToken"));
-        assert!(script.starts_with("{\n"));
-        assert!(script.trim_end().ends_with("} < /dev/null"));
-        assert!(script.contains("ml_sync"));
-        // Defaults are applied to fields left empty.
-        assert!(script.contains(&format!("MIA_PORT=\"$(ml_b64d '{}')\"", b64("8080"))));
+        assert!(phases.iter().any(|p| matches!(p, Phase::Sync { .. })));
+        for script in scripts(&phases) {
+            assert!(!script.contains("S3cret!pass"));
+            assert!(!script.contains("ghp_secretToken"));
+            assert!(script.starts_with("{\n"));
+            assert!(script.trim_end().ends_with("} < /dev/null"));
+            assert!(script.contains(COMMIT_SLOT));
+            // Defaults are applied to fields left empty.
+            assert!(script.contains(&format!("MIA_PORT=\"$(ml_b64d '{}')\"", b64("8080"))));
+        }
     }
 
     fn bash() -> &'static str {
@@ -482,7 +494,7 @@ mod tests {
                     Action::Restart,
                     Action::Remove,
                 ] {
-                    let script = build(&Plan {
+                    let phases = build_phases(&Plan {
                         app,
                         target,
                         action,
@@ -492,17 +504,20 @@ mod tests {
                         token: Some("tok"),
                         windows: false,
                     });
-                    let out = std::process::Command::new(bash())
-                        .args(["-n", "-c", &script])
-                        .output()
-                        .unwrap();
-                    assert!(
-                        out.status.success(),
-                        "{} {:?}: {}",
-                        app.id,
-                        action,
-                        String::from_utf8_lossy(&out.stderr)
-                    );
+                    for script in scripts(&phases) {
+                        let script = script.replace(COMMIT_SLOT, "'abc1234'");
+                        let out = std::process::Command::new(bash())
+                            .args(["-n", "-c", &script])
+                            .output()
+                            .unwrap();
+                        assert!(
+                            out.status.success(),
+                            "{} {:?}: {}",
+                            app.id,
+                            action,
+                            String::from_utf8_lossy(&out.stderr)
+                        );
+                    }
                 }
             }
         }
@@ -609,7 +624,11 @@ mod tests {
 
         // A free port: install.sh builds an image named after the folder, bound to localhost.
         let out = run(port);
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert_eq!(
             std::fs::read_to_string(dir.join("seen")).unwrap(),
             format!("myalfred-recette-mia:latest 127.0.0.1 {port}\n")
@@ -618,7 +637,11 @@ mod tests {
         // A reinstall keeps the image recorded in .env.
         std::fs::write(dir.join(".env"), "APP_IMAGE=mia-prod:latest\n").unwrap();
         let out = run(port);
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert!(std::fs::read_to_string(dir.join("seen"))
             .unwrap()
             .starts_with("mia-prod:latest "));
@@ -702,8 +725,14 @@ mod tests {
             .contains(&format!("::ml::error::Le port {port} est déjà utilisé")));
         assert!(!dir.join("seen").exists());
         let env = std::fs::read_to_string(dir.join(".env")).unwrap();
-        assert!(env.contains("COMPOSE_PROJECT_NAME='myalfred-recette-mytrix'\n"), "{env}");
-        assert!(env.contains("APP_VERSION='myalfred-recette-mytrix'\n"), "{env}");
+        assert!(
+            env.contains("COMPOSE_PROJECT_NAME='myalfred-recette-mytrix'\n"),
+            "{env}"
+        );
+        assert!(
+            env.contains("APP_VERSION='myalfred-recette-mytrix'\n"),
+            "{env}"
+        );
         assert!(!env.contains("APP_VERSION='dev'"), "{env}");
 
         // The port is held by this install's own app (a reinstall): it goes on, and
@@ -711,16 +740,30 @@ mod tests {
         std::fs::write(dir.join("port.out"), format!("127.0.0.1:{port}\n")).unwrap();
         std::fs::write(dir.join("ps.out"), "0123456789ab\n").unwrap();
         let out = run();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(std::fs::read_to_string(dir.join("seen")).unwrap(), "installer\n");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("seen")).unwrap(),
+            "installer\n"
+        );
         drop(busy);
 
         // A free port.
         std::fs::remove_file(dir.join("port.out")).unwrap();
         std::fs::remove_file(dir.join("seen")).unwrap();
         let out = run();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(std::fs::read_to_string(dir.join("seen")).unwrap(), "installer\n");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("seen")).unwrap(),
+            "installer\n"
+        );
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
@@ -733,9 +776,12 @@ mod tests {
         for (action, cmd) in [
             (Action::Stop, "ml_compose stop --timeout 60\n"),
             (Action::Restart, "ml_compose stop --timeout 60\n"),
-            (Action::Remove, "ml_compose down --remove-orphans --timeout 60\n"),
+            (
+                Action::Remove,
+                "ml_compose down --remove-orphans --timeout 60\n",
+            ),
         ] {
-            let script = build(&Plan {
+            let phases = build_phases(&Plan {
                 app,
                 target,
                 action,
@@ -745,8 +791,107 @@ mod tests {
                 token: None,
                 windows: false,
             });
-            assert!(script.contains(cmd), "{action:?}");
+            assert!(scripts(&phases).concat().contains(cmd), "{action:?}");
         }
+    }
+
+    /// MIA's update backs up with the old code, then fetches, then builds.
+    #[test]
+    fn update_is_split_around_the_code_fetch() {
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mia").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let values = BTreeMap::new();
+        let phases = build_phases(&Plan {
+            app,
+            target,
+            action: Action::Update,
+            dir: "/x/mia",
+            values: &values,
+            git_ref: ("branch", "main"),
+            token: None,
+            windows: false,
+        });
+        assert_eq!(phases.len(), 3);
+        match (&phases[0], &phases[1], &phases[2]) {
+            (Phase::Script(before), Phase::Sync { label }, Phase::Script(after)) => {
+                assert!(before.contains("bash ./backup.sh") && !before.contains("ml_report\n"));
+                assert_eq!(label, "Récupération de la nouvelle version");
+                assert!(after.contains("ml_compose build") && after.contains("ml_report\n"));
+            }
+            other => panic!("phases inattendues : {other:?}"),
+        }
+        // Start / stop never fetch the code.
+        let start = build_phases(&Plan {
+            action: Action::Start,
+            ..plan_like(app, target, &values)
+        });
+        assert_eq!(start.len(), 1);
+    }
+
+    fn plan_like<'a>(
+        app: &'a AppDef,
+        target: &'a TargetDef,
+        values: &'a BTreeMap<String, String>,
+    ) -> Plan<'a> {
+        Plan {
+            app,
+            target,
+            action: Action::Install,
+            dir: "/x/app",
+            values,
+            git_ref: ("branch", "main"),
+            token: None,
+            windows: false,
+        }
+    }
+
+    /// Without git on the machine, the apps' scripts still get the commit.
+    #[test]
+    fn git_is_answered_when_absent() {
+        if cfg!(windows) {
+            return;
+        }
+        let bin = std::env::temp_dir().join(format!("ml-nogit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(bash(), bin.join("bash")).unwrap();
+        let script = format!(
+            "{{\n{PRELUDE}\nML_COMMIT=0123456789abcdef; export ML_COMMIT\n\
+             git rev-parse HEAD\nbash -c 'git rev-parse --short HEAD'\n\
+             git pull || echo refused\n}} < /dev/null\n"
+        );
+        let out = std::process::Command::new(bin.join("bash"))
+            .args(["-c", &script])
+            .env("PATH", &bin)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(stdout, "0123456789abcdef\n0123456\nrefused\n");
+        let _ = std::fs::remove_dir_all(&bin);
+    }
+
+    #[test]
+    fn host_check_reports_disk_space() {
+        if cfg!(windows) {
+            return;
+        }
+        let script = host_check_script("/nonexistent/deep/MyAlfred");
+        let out = std::process::Command::new(bash())
+            .args(["-c", &script])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let free = stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("::ml::result::diskfree="))
+            .expect("diskfree");
+        assert!(free.parse::<u64>().unwrap() > 0, "{stdout}");
+        assert!(script.contains("{{.MemTotal}}"));
     }
 
     #[test]
@@ -758,76 +903,5 @@ mod tests {
         assert_eq!(labels.len(), 1 + target.update.len());
         let start = step_labels(target, Action::Start);
         assert_eq!(start.last().unwrap(), "Démarrage");
-    }
-}
-
-#[cfg(test)]
-mod live {
-    use super::*;
-    use crate::catalog::{Catalog, EMBEDDED};
-
-    /// Clones a private repo with the token passed the way real scripts do,
-    /// then reports the version. Run with `GITHUB_TOKEN=… ML_TEST_DIR=… cargo test -- --ignored live_`.
-    #[test]
-    #[ignore]
-    fn live_sync_private_repo() {
-        let token = std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN");
-        let base = std::env::var("ML_TEST_DIR").expect("ML_TEST_DIR");
-        let catalog = Catalog::parse(EMBEDDED).unwrap();
-        let app = catalog.app("mytrix").unwrap();
-        let target = app.targets.local.as_ref().unwrap();
-        let values = BTreeMap::new();
-        let dir = format!("{base}/mytrix");
-        let plan = Plan {
-            app,
-            target,
-            action: Action::Install,
-            dir: &dir,
-            values: &values,
-            git_ref: ("branch", "main"),
-            token: Some(&token),
-            windows: false,
-        };
-        let script = format!(
-            "{{\n{PRELUDE}{}ml_sync\nml_report\n}} < /dev/null\n",
-            context_block(&plan)
-        );
-        assert!(!script.contains(&token));
-        let out = super::tests_support::run(&script);
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        println!("{stdout}\n{}", String::from_utf8_lossy(&out.stderr));
-        assert!(out.status.success());
-        assert!(stdout.contains("::ml::result::commit="));
-        // Run again: the existing clone is updated in place.
-        let out = super::tests_support::run(&script);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        // The token must not be persisted in the clone.
-        let cfg = std::fs::read_to_string(format!("{dir}/.git/config")).unwrap();
-        assert!(!cfg.contains(&token) && !cfg.contains("extraheader"));
-    }
-}
-
-#[cfg(test)]
-mod tests_support {
-    pub fn run(script: &str) -> std::process::Output {
-        use std::io::Write;
-        let mut child = std::process::Command::new("/bin/bash")
-            .arg("-s")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(script.as_bytes())
-            .unwrap();
-        child.wait_with_output().unwrap()
     }
 }

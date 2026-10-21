@@ -32,6 +32,9 @@ regex-lite = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
+# Git built in: the machine needs no git. TLS: native on macOS/Windows,
+# OpenSSL compiled in on Linux.
+git2 = { version = "0.20", default-features = false, features = ["https", "vendored-libgit2", "vendored-openssl"] }
 
 
 [profile.release]

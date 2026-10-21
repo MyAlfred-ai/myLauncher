@@ -166,6 +166,28 @@ function simulate(installationId: string, appId: string, action: OpInfo["action"
   return op.id;
 }
 
+// Demo: ?docker=absent|stopped|lowmem shows the Docker assistant's states.
+let dockerState = new URLSearchParams(location.search).get("docker") ?? "running";
+
+function hostCheck() {
+  const installed = dockerState !== "absent";
+  const running = dockerState === "running" || dockerState === "lowmem";
+  return {
+    reachable: true,
+    os: "Darwin arm64",
+    git: "",
+    docker: installed ? "Docker version 28.5.1, build e180ab8" : "",
+    compose: installed ? "2.39.4" : "",
+    daemon: running,
+    dockerApp: installed ? "Docker Desktop" : null,
+    canInstallDocker: true,
+    memTotal: running ? (dockerState === "lowmem" ? 1.5 : 7.7) * 1024 ** 3 : 0,
+    diskFree: 182 * 1024 **3,
+    engine: running ? "Docker Desktop" : "",
+    error: null,
+  };
+}
+
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   await new Promise((r) => setTimeout(r, 120));
   const a = args as Record<string, any>;
@@ -196,15 +218,27 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       hasToken = false;
       return undefined as T;
     case "check_host":
-      return {
-        reachable: true,
-        os: "Darwin arm64",
-        git: "git version 2.50.1",
-        docker: "Docker version 28.5.1",
-        compose: "2.39.4",
-        daemon: true,
-        error: null,
-      } as T;
+      return hostCheck() as T;
+    case "docker_start":
+      await new Promise((r) => setTimeout(r, 2500));
+      dockerState = "running";
+      return hostCheck() as T;
+    case "docker_install": {
+      const total = 612_000_000;
+      for (let received = 0; received <= total; received += total / 12) {
+        emit("docker-setup", { phase: "download", received, total });
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      for (const phase of ["install", "start"]) {
+        emit("docker-setup", { phase, received: 0, total: 0 });
+        await new Promise((r) => setTimeout(r, 1800));
+      }
+      dockerState = "running";
+      emit("docker-setup", { phase: "done", received: 0, total: 0 });
+      return hostCheck() as T;
+    }
+    case "docker_install_cancel":
+      return undefined as T;
     case "default_install_dir":
       return `${settings.installDir}/${a.appId}` as T;
     case "install_app": {

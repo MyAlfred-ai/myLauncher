@@ -1,5 +1,18 @@
 # Changelog
 
+## [Non publié]
+
+### Ajouté
+- Docker absent : le launcher télécharge Docker Desktop depuis le site officiel, vérifie sa
+  signature et l'installe après acceptation de la licence (un mot de passe administrateur),
+  puis le démarre et reprend l'installation de l'application.
+- Docker arrêté : démarré automatiquement, à la vérification du poste comme avant chaque opération.
+- Vérification de la mémoire allouée à Docker et de l'espace disque libre, avec des conseils clairs.
+
+### Modifié
+- Git n'est plus nécessaire sur le poste : le code des applications est récupéré par le Git
+  intégré au launcher. Les installations existantes continuent de fonctionner.
+
 ## [0.1.3] - 2026-10-19
 
 ### Ajouté
