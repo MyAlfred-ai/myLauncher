@@ -352,4 +352,21 @@ mod live {
         println!("sans token : {err}");
         assert!(err.to_string().contains("token GitHub"));
     }
+
+    /// MIA is public: cloned without any token.
+    #[test]
+    #[ignore]
+    fn live_sync_public_repo_without_token() {
+        let base = std::env::var("ML_TEST_DIR").expect("ML_TEST_DIR");
+        let dir = std::path::Path::new(&base).join("mia");
+        let src = Source {
+            url: "https://github.com/MyAlfred-ai/mia.git".into(),
+            ref_kind: "branch".into(),
+            ref_name: "main".into(),
+            token: None,
+        };
+        let commit = sync(&dir, &src, &AtomicBool::new(false), |m| println!("{m}")).unwrap();
+        assert_eq!(head_commit(&dir).unwrap(), commit);
+        assert!(dir.join("install.sh").exists() && dir.join("VERSION").exists());
+    }
 }

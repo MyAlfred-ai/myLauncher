@@ -767,6 +767,123 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
+    /// Runs MIA's "Sauvegarde" step with a stub docker: the public repository
+    /// has no backup.sh, so the catalog carries the backup itself.
+    #[test]
+    fn mia_backup_step_dumps_archives_and_keeps_three() {
+        if cfg!(windows) {
+            return;
+        }
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mia").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let step = &target.update[0];
+        assert_eq!(step.label, "Sauvegarde");
+        let base = std::env::temp_dir().join(format!("ml-test-{}", uuid::Uuid::new_v4()));
+        let dir = base.join("Recette MIA");
+        let backups = base.join("home/backups/Recette MIA");
+        std::fs::create_dir_all(&dir).unwrap();
+        for old in [
+            "20250101_000000",
+            "20250102_000000",
+            "20250103_000000",
+            "20250104_000000",
+            "notes",
+        ] {
+            std::fs::create_dir_all(backups.join(old)).unwrap();
+        }
+        // `log-refused`: the engine refuses `--log-driver none`.
+        let docker = r#"docker() {
+  case "$1" in
+    compose) case "$2" in
+        exec) cat dump.out ;;
+        ps) printf 'cid-app\n' ;;
+      esac ;;
+    run) printf '%s\n' "$*" >> runs
+      case " $* " in *" --log-driver none "*) [ ! -f log-refused ] || return 1 ;; esac
+      printf 'archive' ;;
+  esac
+}
+"#;
+        let run = || {
+            let values = BTreeMap::new();
+            let dir_s = dir.to_string_lossy().into_owned();
+            let plan = Plan {
+                action: Action::Update,
+                dir: &dir_s,
+                ..plan_like(app, target, &values)
+            };
+            let script = format!(
+                "{{\n{PRELUDE}{}HOME={}\n{docker}cd \"$ML_WORK\"\n{}\n}} < /dev/null\n",
+                context_block(&plan).replace(COMMIT_SLOT, "0123456789abcdef"),
+                sh_quote(&base.join("home").to_string_lossy()),
+                step.run
+            );
+            run_bash(&script, &dir)
+        };
+        let listing = || {
+            let mut l: Vec<String> = std::fs::read_dir(&backups)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            l.sort();
+            l
+        };
+
+        // A truncated dump stops the update and leaves no half-written backup.
+        std::fs::write(
+            dir.join("dump.out"),
+            "-- MySQL dump\nCREATE TABLE t (id int);\n",
+        )
+        .unwrap();
+        let out = run();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr)
+            .contains("::ml::error::Sauvegarde de la base impossible"));
+        assert_eq!(listing().len(), 5);
+
+        // A complete dump: database, files and commit saved; three backups kept.
+        std::fs::write(
+            dir.join("dump.out"),
+            "-- MySQL dump\nCREATE TABLE t (id int);\n-- Dump completed on 2026-10-26 10:00:00\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("log-refused"), "").unwrap();
+        let out = run();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let l = listing();
+        assert_eq!(l.len(), 4, "{l:?}");
+        assert_eq!(l[..2], ["20250103_000000", "20250104_000000"]);
+        assert_eq!(l[3], "notes");
+        let new = backups.join(&l[2]);
+        assert_eq!(
+            std::fs::read_to_string(new.join("git_sha.txt")).unwrap(),
+            "0123456789abcdef\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(new.join("data.tar.gz")).unwrap(),
+            "archive"
+        );
+        let sql = std::process::Command::new("gzip")
+            .arg("-dc")
+            .arg(new.join("db.sql.gz"))
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&sql.stdout)
+            .ends_with("-- Dump completed on 2026-10-26 10:00:00\n"));
+        // The archive is retried with the default log driver, from the app container.
+        let runs = std::fs::read_to_string(dir.join("runs")).unwrap();
+        assert_eq!(runs.lines().count(), 2, "{runs}");
+        assert!(runs
+            .lines()
+            .all(|r| r.contains("--volumes-from cid-app alpine:3.22")));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn default_stop_lets_databases_shut_down() {
         let catalog = Catalog::parse(EMBEDDED).unwrap();
@@ -815,7 +932,7 @@ mod tests {
         assert_eq!(phases.len(), 3);
         match (&phases[0], &phases[1], &phases[2]) {
             (Phase::Script(before), Phase::Sync { label }, Phase::Script(after)) => {
-                assert!(before.contains("bash ./backup.sh") && !before.contains("ml_report\n"));
+                assert!(before.contains("mysqldump") && !before.contains("ml_report\n"));
                 assert_eq!(label, "Récupération de la nouvelle version");
                 assert!(after.contains("ml_compose build") && after.contains("ml_report\n"));
             }

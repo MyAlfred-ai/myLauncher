@@ -12,6 +12,11 @@
 ### Modifié
 - Git n'est plus nécessaire sur le poste : le code des applications est récupéré par le Git
   intégré au launcher. Les installations existantes continuent de fonctionner.
+- MIA vient de son dépôt public MyAlfred-ai/mia : plus besoin de token GitHub pour l'installer
+  ou la mettre à jour. Les installations existantes passent au nouveau dépôt à la mise à jour
+  suivante.
+- MIA : la sauvegarde d'avant mise à jour (base MySQL et fichiers, dans `~/backups`, les 3
+  dernières conservées) est faite par le launcher, le dépôt public n'ayant pas de `backup.sh`.
 
 ## [0.1.3] - 2026-10-19
 

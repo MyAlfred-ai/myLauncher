@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-19",
+  "updated": "2026-10-26",
   "apps": [
     {
       "id": "mia",
@@ -15,7 +15,7 @@
         "Images, vidéos, pages web et présentations",
         "Crédits, quotas et usages par utilisateur"
       ],
-      "repo": { "owner": "MyAlfred-ai", "name": "myLLM", "branch": "main" },
+      "repo": { "owner": "MyAlfred-ai", "name": "mia", "branch": "main" },
       "version": { "source": "file", "path": "VERSION" },
       "changelog": { "source": "file", "path": "docs/NOUVEAUTES.md" },
       "requirements": ["Docker", "Une clé API d'IA (ou une IA locale)", "5 Go de disque", "4 Go de mémoire conseillés"],
@@ -65,7 +65,7 @@
             { "label": "Vérification", "run": "ml_wait 300 ml_container_http app http://127.0.0.1/healthz || ml_fail \"MIA ne répond pas. Consultez le journal ci-dessus.\"" }
           ],
           "update": [
-            { "label": "Sauvegarde", "run": "ml_compose up -d db\nbash ./backup.sh" },
+            { "label": "Sauvegarde", "run": "ml_compose up -d --wait db\nracine=\"$HOME/backups/${PWD##*/}\"\ndest=\"$racine/$(date +%Y%m%d_%H%M%S)\"\nmkdir -p \"$racine\"\n(umask 077 && mkdir \"$dest\")\nml_info \"Sauvegarde dans $dest\"\nprintf '%s\\n' \"$ML_COMMIT\" > \"$dest/git_sha.txt\"\nif ! ml_compose exec -T db sh -c 'exec mysqldump --single-transaction --routines --triggers --no-tablespaces -u root -p\"$MYSQL_ROOT_PASSWORD\" \"$MYSQL_DATABASE\"' > \"$dest/db.sql\" || ! tail -n 1 \"$dest/db.sql\" | grep -q '^-- Dump completed'; then\n  rm -rf \"$dest\"\n  ml_fail \"Sauvegarde de la base impossible : mise à jour annulée, rien n'a été modifié.\"\nfi\ngzip -1 \"$dest/db.sql\"\napp=\"$(ml_compose ps -aq app | head -n 1)\"\n[ -n \"$app\" ] || { rm -rf \"$dest\"; ml_fail \"Conteneur de MIA introuvable : sauvegarde impossible, mise à jour annulée.\"; }\nml_archive() { docker run --rm \"$@\" --volumes-from \"$app\" alpine:3.22 sh -c 'set --; for p in /var/www/html/storage/uploads /var/www/html/storage/profile_documents /var/www/html/storage/knowledge_bases /var/www/html/storage/branding /var/www/html/public/assets/img/generated /var/www/html/public/assets/img/branding /var/www/html/public/assets/img/avatars /var/www/html/public/assets/img/profils /var/www/html/public/assets/video/generated; do if [ -d \"$p\" ]; then set -- \"$@\" \"$p\"; fi; done; [ \"$#\" -gt 0 ] && tar czf - \"$@\"' > \"$dest/data.tar.gz\"; }\nif ! { ml_archive --log-driver none || ml_archive; } || [ ! -s \"$dest/data.tar.gz\" ]; then\n  rm -rf \"$dest\"\n  ml_fail \"Sauvegarde des fichiers de MIA impossible : mise à jour annulée, rien n'a été modifié.\"\nfi\nanciennes=(\"$racine\"/[0-9]*_[0-9]*/)\nfor ((i = 0; i < ${#anciennes[@]} - 3; i++)); do rm -rf \"${anciennes[i]}\"; done\nml_info \"Sauvegarde terminée : $dest ($(du -sh \"$dest\" | cut -f1))\"" },
             { "label": "Récupération de la nouvelle version", "run": "@sync" },
             { "label": "Construction", "run": "ml_compose build" },
             { "label": "Redémarrage", "run": "ml_compose up -d" },
