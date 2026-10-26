@@ -91,8 +91,8 @@ npm run check          # vérification des types
 cargo test --manifest-path src-tauri/Cargo.toml   # tests du cœur (dont exécution réelle sous bash 3.2)
 ```
 
-Tests en conditions réelles (lecture seule sur GitHub, clonage d'un dépôt privé et de MIA,
-publique, sans token, dans un dossier temporaire) :
+Tests en conditions réelles (lecture seule sur GitHub, clonage d'un dépôt privé, puis de MIA et
+myBrief, publiques, sans token, dans un dossier temporaire) :
 
 ```bash
 GITHUB_TOKEN=$(gh auth token) ML_TEST_DIR=$(mktemp -d) cargo test --manifest-path src-tauri/Cargo.toml -- --ignored live_
@@ -130,13 +130,21 @@ clé en a un). La clé privée de signature n'est **pas** dans le dépôt ; la c
 Rien à changer dans le code : sans token, le launcher lit les versions publiques et clone en
 HTTPS anonyme. La mise à jour du launcher fonctionne dès que les releases de ce dépôt sont publiques.
 
-MIA est publique ([MyAlfred-ai/mia](https://github.com/MyAlfred-ai/mia)) : elle s'installe et se
-met à jour sans token. Les installations faites depuis l'ancien dépôt privé `myLLM` basculent
-d'elles-mêmes à la mise à jour suivante. Tant que ce dépôt-ci reste privé, un launcher sans token
-ne lit pas le catalogue distant et garde celui qu'il embarque : publier une version du launcher
-pour que tous profitent du changement. Le dépôt public n'ayant pas de `backup.sh`, la sauvegarde
-d'avant mise à jour (base MySQL et fichiers, dans `~/backups/<dossier>`, 3 conservées) est
-écrite dans le catalogue.
+MIA ([MyAlfred-ai/mia](https://github.com/MyAlfred-ai/mia)) et myBrief
+([MyAlfred-ai/my-brief](https://github.com/MyAlfred-ai/my-brief)) sont publiques : elles
+s'installent et se mettent à jour sans token. Tant que ce dépôt-ci reste privé, un launcher sans
+token ne lit pas le catalogue distant et garde celui qu'il embarque : publier une version du
+launcher pour que tous profitent du changement.
+
+- **MIA** : les installations faites depuis l'ancien dépôt privé `myLLM` basculent d'elles-mêmes
+  à la mise à jour suivante. Le dépôt public n'ayant pas de `backup.sh`, la sauvegarde d'avant
+  mise à jour (base MySQL et fichiers, dans `~/backups/<dossier>`, 3 conservées) est écrite dans
+  le catalogue.
+- **myBrief** : le launcher suit les versions publiées (releases `vX.Y.Z`, images signées
+  `ghcr.io/myalfred-ai/mybrief/*`) et s'appuie sur le kit du dépôt (`kit/`) : la mise à jour
+  passe par `kit/update.sh` (sauvegarde MongoDB et `.env` dans `kit/sauvegardes`, signature
+  vérifiée, retour arrière). Une ancienne installation locale faite depuis le dépôt privé
+  (dossier `install/`) n'est pas migrée : la désinstaller puis réinstaller.
 
 ## Limites connues
 

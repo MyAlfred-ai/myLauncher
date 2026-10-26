@@ -87,8 +87,8 @@
         "Détection automatique des actions",
         "Apps iOS, Android et extension Chrome"
       ],
-      "repo": { "owner": "MyAlfred-ai", "name": "myBrief", "branch": "main" },
-      "version": { "source": "file", "path": "src/version.json", "jsonKey": "version" },
+      "repo": { "owner": "MyAlfred-ai", "name": "my-brief", "branch": "main" },
+      "version": { "source": "releases" },
       "changelog": { "source": "file", "path": "NOUVEAUTES.md" },
       "requirements": ["Docker", "Une clé API OpenAI", "Ports 80 et 443 libres"],
       "services": [
@@ -112,7 +112,7 @@
       "targets": {
         "local": {
           "experimental": true,
-          "workdir": "install",
+          "workdir": "kit",
           "url": "https://localhost",
           "duration": "5 minutes", "minMemoryGb": 2, "minDiskGb": 4,
           "notes": [
@@ -125,22 +125,20 @@
           ],
           "fields": [
             { "key": "ADMIN_SEED_EMAIL", "label": "E-mail de l'administrateur", "kind": "email", "required": true, "placeholder": "vous@entreprise.fr" },
-            { "key": "ADMIN_SEED_PASSWORD", "label": "Mot de passe provisoire", "kind": "password", "required": true, "minLength": 8, "generate": "password", "help": "À changer à la première connexion." },
+            { "key": "ADMIN_SEED_PASSWORD", "label": "Mot de passe provisoire", "kind": "password", "required": true, "minLength": 12, "generate": "password", "help": "12 caractères au moins. À changer à la première connexion." },
             { "key": "OPENAI_API_KEY", "label": "Clé API OpenAI", "kind": "secret", "placeholder": "sk-…", "help": "Nécessaire pour la transcription et les comptes rendus. Vous pouvez aussi la saisir plus tard dans Administration → IA." }
           ],
           "install": [
             { "label": "Récupération du code", "run": "@sync" },
-            { "label": "Configuration", "run": "[ -f .env ] || cp env.example .env\nchmod 600 .env\nml_dotenv DOMAIN localhost\nml_dotenv ACME_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv_default MONGO_PASS \"$(ml_rand_hex 24)\"\nml_dotenv_default CONNECTIONS_ENC_KEY \"$(ml_rand_hex 32)\"\nml_dotenv ADMIN_SEED_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv ADMIN_SEED_PASSWORD \"$ADMIN_SEED_PASSWORD\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\"" },
+            { "label": "Configuration", "run": "[ \"$ML_REF_KIND\" = tag ] || ml_fail \"Aucune version publiée de myBrief trouvée : installation impossible.\"\nif [ ! -f .env ]; then\n  (umask 077 && cp env.example .env)\n  ml_dotenv COMPOSE_PROJECT_NAME \"myalfred-$(printf '%s' \"${ML_DIR##*/}\" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')\"\nfi\nchmod 600 .env\nml_dotenv DOMAIN localhost\nml_dotenv ACME_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv_default MONGO_PASS \"$(ml_rand_hex 24)\"\nml_dotenv_default CONNECTIONS_ENC_KEY \"$(ml_rand_hex 32)\"\nml_dotenv ADMIN_SEED_EMAIL \"$ADMIN_SEED_EMAIL\"\nml_dotenv ADMIN_SEED_PASSWORD \"$ADMIN_SEED_PASSWORD\"\nml_dotenv MYBRIEF_VERSION \"${ML_REF#v}\"\n[ -z \"$OPENAI_API_KEY\" ] || ml_dotenv OPENAI_API_KEY \"$OPENAI_API_KEY\"" },
             { "label": "Téléchargement des images", "run": "ml_pull" },
             { "label": "Démarrage", "run": "ml_compose up -d" },
             { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas. Consultez le journal ci-dessus.\"" }
           ],
           "update": [
-            { "label": "Sauvegarde de la base", "run": "ml_compose up -d mongo\nbash ./install.sh backup" },
             { "label": "Récupération de la nouvelle version", "run": "@sync" },
-            { "label": "Téléchargement des images", "run": "ml_pull" },
-            { "label": "Redémarrage", "run": "ml_compose up -d" },
-            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas après la mise à jour. Sauvegarde disponible dans install/backups.\"" }
+            { "label": "Sauvegarde, vérification des images et mise à jour", "run": "[ \"$ML_REF_KIND\" = tag ] || ml_fail \"Aucune version publiée de myBrief trouvée : mise à jour impossible.\"\ncode=0\nbash ./update.sh \"${ML_REF#v}\" || code=$?\ncase \"$code\" in\n  0) ;;\n  1) ml_fail \"Mise à jour non appliquée : myBrief reste dans sa version précédente. Consultez le journal ci-dessus.\" ;;\n  *) ml_fail \"La mise à jour a échoué et le retour à la version précédente est incomplet : intervention requise (sauvegarde dans le dossier kit/sauvegardes).\" ;;\nesac" },
+            { "label": "Vérification", "run": "ml_wait 180 ml_container_http api http://127.0.0.1:3000/api/ping || ml_fail \"L'API myBrief ne répond pas après la mise à jour. Sauvegarde disponible dans kit/sauvegardes.\"" }
           ]
         }
       }

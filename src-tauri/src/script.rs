@@ -884,6 +884,134 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Runs myBrief's "Configuration" step and its update step (stub
+    /// update.sh): the public kit deploys the published version of the tag.
+    #[test]
+    fn mybrief_steps_follow_the_published_version() {
+        if cfg!(windows) {
+            return;
+        }
+        let catalog = Catalog::parse(EMBEDDED).unwrap();
+        let app = catalog.app("mybrief").unwrap();
+        let target = app.targets.local.as_ref().unwrap();
+        let (config, update) = (&target.install[1], &target.update[1]);
+        let base = std::env::temp_dir().join(format!("ml-test-{}", uuid::Uuid::new_v4()));
+        let dir = base.join("Recette myBrief");
+        let kit = dir.join("kit");
+        std::fs::create_dir_all(&kit).unwrap();
+        std::fs::write(
+            kit.join("env.example"),
+            "DOMAIN=mybrief.example.com\nMONGO_PASS=\nADMIN_SEED_PASSWORD=\nMYBRIEF_VERSION=1.3.0\nCOMPOSE_PROJECT_NAME=mybrief\nCONNECTIONS_ENC_KEY=\n",
+        )
+        .unwrap();
+        std::fs::write(
+            kit.join("update.sh"),
+            "printf '%s\\n' \"$*\" > seen\nexit \"$(cat code)\"\n",
+        )
+        .unwrap();
+        let run = |step: &Step, git_ref: (&str, &str)| {
+            let mut values = BTreeMap::new();
+            values.insert(
+                "ADMIN_SEED_EMAIL".to_string(),
+                "admin@entreprise.fr".to_string(),
+            );
+            values.insert(
+                "ADMIN_SEED_PASSWORD".to_string(),
+                "assez-long-123".to_string(),
+            );
+            let dir_s = dir.to_string_lossy().into_owned();
+            let plan = Plan {
+                dir: &dir_s,
+                git_ref,
+                ..plan_like(app, target, &values)
+            };
+            let script = format!(
+                "{{\n{PRELUDE}{}cd \"$ML_WORK\"\n{}\n}} < /dev/null\n",
+                context_block(&plan),
+                step.run
+            );
+            run_bash(&script, &dir)
+        };
+        let env = |key: &str| {
+            let text = std::fs::read_to_string(kit.join(".env")).unwrap();
+            text.lines()
+                .find_map(|l| l.strip_prefix(&format!("{key}=")))
+                .unwrap_or_else(|| panic!("{key} absent : {text}"))
+                .to_string()
+        };
+
+        // Without a published version, nothing is written.
+        let out = run(config, ("branch", "main"));
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains("Aucune version publiée"));
+        assert!(!kit.join(".env").exists());
+
+        // First install: its own Compose project, the tag's version, fresh secrets.
+        let out = run(config, ("tag", "v1.4.0"));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(env("COMPOSE_PROJECT_NAME"), "myalfred-recette-mybrief");
+        assert_eq!(env("MYBRIEF_VERSION"), "1.4.0");
+        assert_eq!(env("DOMAIN"), "localhost");
+        assert_eq!(env("ADMIN_SEED_PASSWORD"), "assez-long-123");
+        let mongo = env("MONGO_PASS");
+        assert_eq!(mongo.len(), 48);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(kit.join(".env"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        // A reinstall keeps the secrets and the project its volumes belong to.
+        let text = std::fs::read_to_string(kit.join(".env")).unwrap();
+        std::fs::write(
+            kit.join(".env"),
+            text.replace("myalfred-recette-mybrief", "ancien"),
+        )
+        .unwrap();
+        let out = run(config, ("tag", "v1.4.1"));
+        assert!(out.status.success());
+        assert_eq!(env("MONGO_PASS"), mongo);
+        assert_eq!(env("COMPOSE_PROJECT_NAME"), "ancien");
+        assert_eq!(env("MYBRIEF_VERSION"), "1.4.1");
+
+        // The update hands the version to the kit and explains its exit codes.
+        for (code, message) in [
+            ("0", None),
+            ("1", Some("::ml::error::Mise à jour non appliquée")),
+            (
+                "2",
+                Some("::ml::error::La mise à jour a échoué et le retour"),
+            ),
+        ] {
+            std::fs::write(kit.join("code"), code).unwrap();
+            let out = run(update, ("tag", "v1.5.0"));
+            assert_eq!(
+                std::fs::read_to_string(kit.join("seen")).unwrap(),
+                "1.5.0\n"
+            );
+            match message {
+                None => assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                ),
+                Some(m) => {
+                    assert!(!out.status.success());
+                    assert!(String::from_utf8_lossy(&out.stderr).contains(m), "{code}");
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn default_stop_lets_databases_shut_down() {
         let catalog = Catalog::parse(EMBEDDED).unwrap();

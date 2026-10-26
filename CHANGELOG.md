@@ -17,6 +17,10 @@
   suivante.
 - MIA : la sauvegarde d'avant mise à jour (base MySQL et fichiers, dans `~/backups`, les 3
   dernières conservées) est faite par le launcher, le dépôt public n'ayant pas de `backup.sh`.
+- myBrief vient de son dépôt public MyAlfred-ai/my-brief : plus besoin de token GitHub. Le
+  launcher installe la dernière version publiée (images signées) et met à jour avec le kit du
+  dépôt : sauvegarde, vérification des signatures, retour arrière en cas d'échec. Mot de passe
+  provisoire de l'administrateur : 12 caractères au moins.
 
 ## [0.1.3] - 2026-10-19
 

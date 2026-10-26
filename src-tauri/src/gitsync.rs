@@ -353,20 +353,25 @@ mod live {
         assert!(err.to_string().contains("token GitHub"));
     }
 
-    /// MIA is public: cloned without any token.
+    /// MIA and myBrief are public: cloned without any token.
     #[test]
     #[ignore]
     fn live_sync_public_repo_without_token() {
         let base = std::env::var("ML_TEST_DIR").expect("ML_TEST_DIR");
-        let dir = std::path::Path::new(&base).join("mia");
-        let src = Source {
-            url: "https://github.com/MyAlfred-ai/mia.git".into(),
-            ref_kind: "branch".into(),
-            ref_name: "main".into(),
-            token: None,
-        };
-        let commit = sync(&dir, &src, &AtomicBool::new(false), |m| println!("{m}")).unwrap();
-        assert_eq!(head_commit(&dir).unwrap(), commit);
-        assert!(dir.join("install.sh").exists() && dir.join("VERSION").exists());
+        for (name, kind, git_ref, file) in [
+            ("mia", "branch", "main", "install.sh"),
+            ("my-brief", "tag", "v1.3.0", "kit/update.sh"),
+        ] {
+            let dir = std::path::Path::new(&base).join(name);
+            let src = Source {
+                url: format!("https://github.com/MyAlfred-ai/{name}.git"),
+                ref_kind: kind.into(),
+                ref_name: git_ref.into(),
+                token: None,
+            };
+            let commit = sync(&dir, &src, &AtomicBool::new(false), |m| println!("{m}")).unwrap();
+            assert_eq!(head_commit(&dir).unwrap(), commit);
+            assert!(dir.join(file).exists(), "{name}: {file}");
+        }
     }
 }
