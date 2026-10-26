@@ -10,6 +10,7 @@
 - Vérification de la mémoire allouée à Docker et de l'espace disque libre, avec des conseils clairs.
 
 ### Modifié
+- Nouvelle icône du launcher (fusée et nœud papillon MyAlfred).
 - Git n'est plus nécessaire sur le poste : le code des applications est récupéré par le Git
   intégré au launcher. Les installations existantes continuent de fonctionner.
 - MIA vient de son dépôt public MyAlfred-ai/mia : plus besoin de token GitHub pour l'installer
