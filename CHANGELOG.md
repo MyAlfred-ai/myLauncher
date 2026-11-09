@@ -1,6 +1,6 @@
 # Changelog
 
-## [Non publié]
+## [0.1.4] - 2026-11-09
 
 ### Ajouté
 - Docker absent : le launcher télécharge Docker Desktop depuis le site officiel, vérifie sa
@@ -22,6 +22,10 @@
   launcher installe la dernière version publiée (images signées) et met à jour avec le kit du
   dépôt : sauvegarde, vérification des signatures, retour arrière en cas d'échec. Mot de passe
   provisoire de l'administrateur : 12 caractères au moins.
+- Les applications « Bientôt disponible » (myTrix, myBrain) ne sont plus interrogées sur GitHub :
+  sans token, le bandeau « Dépôts privés » ne s'affiche plus à tort.
+- Le bandeau d'erreur de versions parle désormais de GitHub indisponible (hors ligne ou limite
+  de requêtes) ; le token devient facultatif.
 
 ## [0.1.3] - 2026-10-19
 
