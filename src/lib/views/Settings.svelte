@@ -74,7 +74,7 @@
       <div class="b-icon"><Icon name="github" size={20} /></div>
       <div>
         <h2>Accès GitHub</h2>
-        <p class="muted">Nécessaire tant que les dépôts MyAlfred sont privés. Le token reste dans le trousseau de votre système.</p>
+        <p class="muted">Facultatif : il lève la limite de requêtes de GitHub. Le token reste dans le trousseau de votre système.</p>
       </div>
     </div>
     {#if tokenStatus?.present}

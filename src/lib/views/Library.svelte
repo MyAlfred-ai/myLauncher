@@ -42,8 +42,8 @@
     <div class="callout warning">
       <Icon name="key" size={18} />
       <div>
-        <strong>Dépôts privés.</strong> Certaines applications MyAlfred ne sont pas encore publiques : ajoutez un token
-        GitHub pour détecter leurs versions et les installer.
+        <strong>Versions indisponibles pour l'instant.</strong> GitHub ne répond pas (poste hors ligne ou limite de requêtes
+        atteinte) : réessayez plus tard, ou ajoutez un token GitHub pour lever la limite.
         <button class="link" onclick={() => launcher.go({ name: "settings" })}>Ajouter un token</button>
       </div>
     </div>

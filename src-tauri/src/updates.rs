@@ -45,7 +45,8 @@ pub async fn check_all(app: &AppHandle) {
     let token = st.token();
 
     let mut set = tokio::task::JoinSet::new();
-    for a in apps {
+    // "Coming soon" apps live in private repositories: asking GitHub would only fail.
+    for a in apps.into_iter().filter(|a| !a.coming_soon) {
         let token = token.clone();
         set.spawn(async move {
             let gh = Gh::new(token);
