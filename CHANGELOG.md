@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7] - 2026-11-27
+
+### Corrigé
+- Docker Desktop déjà démarré était pris pour arrêté : chaque installation ou mise à jour
+  attendait 3 minutes (« Docker Desktop ne répond toujours pas ») et le bouton de démarrage de
+  Docker échouait.
+
 ## [0.1.6] - 2026-11-27
 
 ### Ajouté
