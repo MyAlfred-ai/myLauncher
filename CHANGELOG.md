@@ -1,6 +1,6 @@
 # Changelog
 
-## [Non publié]
+## [0.1.5] - 2026-11-27
 
 ### Modifié
 - Token GitHub expiré ou révoqué : le launcher continue sans lui (MIA et myBrief se vérifient,
