@@ -40,7 +40,7 @@ describe("informations internes", () => {
     expect(checkLine(fake("écrire à jean.dupont@", "myalfred.ai"))).toContain("adresse e-mail");
     expect(checkLine(fake("client@", "acme-industrie.fr"))).toContain("adresse e-mail");
     expect(checkLine(fake("serveur 192.168", ".1.20"))).toContain("adresse IP privée");
-    expect(checkLine(fake("https://github.com/", ORG, "/myLLM.git"))).toContain("dépôt MyAlfred-ai non public");
+    expect(checkLine(fake("https://github.com/", ORG, "/depot-prive.git"))).toContain("dépôt MyAlfred-ai non public");
   });
 
   it("allows public contact details, examples and public repositories", () => {
@@ -100,8 +100,8 @@ describe("catalogue", () => {
     expect(checkCatalog({ apps: [app({ id: "mytrix", repo: { owner: "MyAlfred-ai", name: "mytrix" } })] }).problems).toEqual([
       "mytrix : application non autorisée à l'installation",
     ]);
-    expect(checkCatalog({ apps: [app({ repo: { owner: ORG, name: "myLLM" } })] }).problems).toEqual([
-      `mia : dépôt ${ORG}/myLLM non autorisé`,
+    expect(checkCatalog({ apps: [app({ repo: { owner: ORG, name: "depot-prive" } })] }).problems).toEqual([
+      `mia : dépôt ${ORG}/depot-prive non autorisé`,
     ]);
   });
 
