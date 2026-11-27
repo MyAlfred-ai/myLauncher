@@ -52,6 +52,11 @@ Elle tourne :
 - dans le workflow **Release**, avant toute construction : sans elle, pas de paquet ; le commit
   publié doit en plus être déjà sur `main`.
 
+GitHub ajoute sa propre protection, activée sur ce dépôt : *secret scanning* (analyse de tout
+l'historique) et *push protection*, qui refuse côté serveur un push contenant un secret reconnu,
+même si le hook local n'a pas tourné. Ne pas la désactiver ; un push refusé se corrige en retirant
+le secret du commit, pas en le débloquant.
+
 La liste privée de mots interdits vient du secret GitHub `PUBLICATION_MOTS_INTERDITS` (un mot
 ou une expression par ligne) ; elle n'est jamais écrite dans le dépôt. Les journaux Actions
 étant publics, le script n'affiche que le fichier, la ligne et la règle, jamais le texte
