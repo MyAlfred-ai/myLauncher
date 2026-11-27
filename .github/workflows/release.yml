@@ -1,7 +1,8 @@
 name: Release
 
 # Pousser un tag vX.Y.Z construit les installeurs (macOS, Windows, Linux),
-# les signe pour la mise à jour automatique et crée une release en brouillon.
+# les signe pour la mise à jour automatique et crée une release en brouillon,
+# avec une copie des installeurs sous un nom fixe (job liens-fixes).
 on:
   push:
     tags: ["v*"]
@@ -11,15 +12,40 @@ permissions:
   contents: write
 
 jobs:
+  # Pas de paquet sans vérification des règles de publication (PUBLICATION.md), et seulement
+  # depuis un commit déjà passé par main (dont la CI a vérifié l'historique).
+  verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Commit présent sur main
+        run: |
+          git merge-base --is-ancestor HEAD origin/main || {
+            echo "::error::Le commit à publier n'est pas sur main : fusionner d'abord la pull request."
+            exit 1
+          }
+      - name: Règles de publication
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MOTS_INTERDITS: ${{ secrets.PUBLICATION_MOTS_INTERDITS }}
+        run: node scripts/verif-publication.mjs
+
   build:
+    needs: verification
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Un seul paquet Mac pour Apple Silicon et Intel : l'utilisateur n'a
+          # pas à connaître son processeur. latest.json le sert aux deux
+          # (darwin-aarch64 et darwin-x86_64), launchers déjà installés compris.
           - platform: macos-latest
-            args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
+            args: --target universal-apple-darwin
           - platform: windows-latest
             args: ""
           - platform: ubuntu-22.04
@@ -84,8 +110,51 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "MyAlfred Launcher ${{ github.ref_name }}"
-          releaseBody: "Voir CHANGELOG.md pour le détail des nouveautés."
+          releaseBody: |
+            ## Télécharger
+
+            - **Mac** (Apple Silicon et Intel) : [MyAlfred-Launcher-macOS.dmg](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/MyAlfred-Launcher-macOS.dmg)
+            - **Windows** : [MyAlfred-Launcher-Windows.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/MyAlfred-Launcher-Windows.exe)
+            - **Linux** : [AppImage](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/MyAlfred-Launcher-Linux.AppImage) ou [paquet .deb](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/MyAlfred-Launcher-Linux.deb)
+
+            Les autres fichiers servent à la mise à jour automatique du launcher.
+            Voir CHANGELOG.md pour le détail des nouveautés.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # Copie des installeurs sous un nom fixe, ajoutée à la release en brouillon :
+  # dès sa publication, ces liens servent la dernière version, sans changer :
+  #   https://github.com/<dépôt>/releases/latest/download/MyAlfred-Launcher-macOS.dmg
+  #   (idem -Windows.exe, -Linux.AppImage, -Linux.deb)
+  liens-fixes:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Installeurs sous un nom fixe
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p versionnes fixes
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D versionnes \
+            -p '*_universal.dmg' -p '*_x64-setup.exe' -p '*.AppImage' -p '*.deb'
+          copie() { # motif nom-fixe
+            local trouves=(versionnes/$1)
+            if [ "${#trouves[@]}" -ne 1 ]; then
+              echo "::error::$1 : ${#trouves[@]} fichier(s) dans la release $TAG, 1 attendu"
+              exit 1
+            fi
+            cp "${trouves[0]}" "fixes/$2"
+          }
+          copie '*_universal.dmg' MyAlfred-Launcher-macOS.dmg
+          copie '*_x64-setup.exe' MyAlfred-Launcher-Windows.exe
+          copie '*.AppImage'      MyAlfred-Launcher-Linux.AppImage
+          copie '*.deb'           MyAlfred-Launcher-Linux.deb
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" --clobber fixes/*
+          ls -l fixes

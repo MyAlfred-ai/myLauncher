@@ -410,13 +410,13 @@ mod tests {
 
     #[test]
     fn mac_command_checks_signature_before_installing() {
-        let cmd = mac_install_command(Path::new("/Users/a b/Library/Caches/x/Docker.dmg"), "axel");
+        let cmd = mac_install_command(Path::new("/Users/a b/Library/Caches/x/Docker.dmg"), "demo");
         let verify = cmd.find("codesign --verify").unwrap();
         let team = cmd.find("TeamIdentifier=9BNSXJN65R").unwrap();
         let install = cmd.find("--accept-license").unwrap();
         assert!(verify < team && team < install);
         assert!(cmd.contains("'/Users/a b/Library/Caches/x/Docker.dmg'"));
-        assert!(cmd.contains("--user='axel'"));
+        assert!(cmd.contains("--user='demo'"));
     }
 
     #[test]
@@ -424,7 +424,7 @@ mod tests {
         if !cfg!(unix) {
             return;
         }
-        let cmd = mac_install_command(Path::new("/tmp/Docker.dmg"), "axel");
+        let cmd = mac_install_command(Path::new("/tmp/Docker.dmg"), "demo");
         let out = std::process::Command::new("/bin/sh")
             .args(["-n", "-c", &cmd])
             .output()

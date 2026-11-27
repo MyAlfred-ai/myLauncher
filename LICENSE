@@ -1,0 +1,38 @@
+MyAlfred Launcher
+Copyright © 2026 MyAlfred
+
+SPDX-License-Identifier: CC-BY-NC-ND-4.0
+
+Ce dépôt (code source, catalogue, documentation, icônes et images) et le launcher qui en est
+construit sont mis à disposition selon les termes de la licence Creative Commons Attribution -
+Pas d'Utilisation Commerciale - Pas de Modification 4.0 International (CC BY-NC-ND 4.0).
+
+  Résumé :             https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr
+  Texte juridique :    https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode.fr
+  English legal code:  https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+
+En résumé : vous pouvez partager le launcher et ce dépôt, sans modification, sur tout support,
+en créditant MyAlfred, en indiquant cette licence et sans en faire un usage commercial. La
+diffusion de versions modifiées n'est pas autorisée.
+
+
+Autorisation supplémentaire
+---------------------------
+
+En plus de la licence ci-dessus, MyAlfred autorise toute personne ou organisation, y compris à
+but lucratif, à télécharger, installer et utiliser le launcher non modifié pour ses propres
+besoins, notamment pour installer, lancer et mettre à jour les applications MyAlfred.
+
+
+Marques
+-------
+
+Cette licence ne donne aucun droit sur les noms et logos MyAlfred, MIA, myBrief, myTrix et
+myBrain.
+
+
+Composants tiers
+----------------
+
+Les bibliothèques tierces utilisées par le launcher restent soumises à leur propre licence. Les
+applications installées par le launcher ont la leur (MIA et myBrief : AGPL-3.0).

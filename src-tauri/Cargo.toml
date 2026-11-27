@@ -3,7 +3,7 @@ name = "mylauncher"
 version = "0.1.5"
 description = "Installe, lance et met à jour les applications MyAlfred"
 authors = ["MyAlfred"]
-license = "UNLICENSED"
+license = "CC-BY-NC-ND-4.0"
 edition = "2021"
 rust-version = "1.85"
 

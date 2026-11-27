@@ -10,6 +10,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Dépôt public : rien d'interdit dans les fichiers ni dans les nouveaux commits (PUBLICATION.md).
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Règles de publication
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MOTS_INTERDITS: ${{ secrets.PUBLICATION_MOTS_INTERDITS }}
+          DEPUIS: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$DEPUIS" ] && git cat-file -e "$DEPUIS^{commit}" 2>/dev/null; then
+            node scripts/verif-publication.mjs --depuis "$DEPUIS"
+          else
+            node scripts/verif-publication.mjs
+          fi
+
   interface:
     runs-on: ubuntu-latest
     steps:

@@ -333,11 +333,17 @@ mod live {
     #[test]
     #[ignore]
     fn live_sync_private_repo() {
+        // A private repository the token can read, as "owner/name": never
+        // written here, this code is public.
+        let Ok(repo) = std::env::var("ML_TEST_PRIVATE_REPO") else {
+            println!("ML_TEST_PRIVATE_REPO absent : test du dépôt privé ignoré");
+            return;
+        };
         let token = std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN");
         let base = std::env::var("ML_TEST_DIR").expect("ML_TEST_DIR");
-        let dir = std::path::Path::new(&base).join("mytrix");
+        let dir = std::path::Path::new(&base).join("private");
         let src = Source {
-            url: "https://github.com/MyAlfred-ai/mytrix.git".into(),
+            url: format!("https://github.com/{repo}.git"),
             ref_kind: "branch".into(),
             ref_name: "main".into(),
             token: Some(token.clone()),

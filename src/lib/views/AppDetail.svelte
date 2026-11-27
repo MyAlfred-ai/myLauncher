@@ -69,6 +69,22 @@
       </div>
     </header>
 
+    {#if app.comingSoon}
+      <!-- Not released yet: name and tagline only, no presentation, news or source. -->
+      {#if installs.length}
+        <div class="installs">
+          {#each installs as inst (inst.id)}
+            <InstallationCard {inst} />
+          {/each}
+        </div>
+      {:else}
+        <div class="empty card">
+          <Icon name="sparkles" size={28} />
+          <h3>{app.name} sera bientôt disponible</h3>
+          <p class="muted">Sa présentation sera publiée à sa sortie.</p>
+        </div>
+      {/if}
+    {:else}
     <ServerOffer appId={app.id} />
 
     {#if latest?.error}
@@ -96,16 +112,10 @@
           </div>
         {:else}
           <div class="empty card">
-            {#if app.comingSoon}
-              <Icon name="sparkles" size={28} />
-              <h3>{app.name} sera bientôt disponible</h3>
-              <p class="muted">En attendant, découvrez sa présentation et ses nouveautés.</p>
-            {:else}
-              <Icon name="download" size={28} />
-              <h3>{app.name} n'est pas encore installé</h3>
-              <p class="muted">Installez-le sur ce poste pour l'essayer ou travailler seul.</p>
-              <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>Installer {app.name}</button>
-            {/if}
+            <Icon name="download" size={28} />
+            <h3>{app.name} n'est pas encore installé</h3>
+            <p class="muted">Installez-le sur ce poste pour l'essayer ou travailler seul.</p>
+            <button class="btn primary" onclick={() => (launcher.installing = { appId: app.id })}>Installer {app.name}</button>
           </div>
         {/if}
       {:else if tab === "about"}
@@ -158,6 +168,7 @@
         </div>
       {/if}
     </section>
+    {/if}
   </div>
 {/if}
 

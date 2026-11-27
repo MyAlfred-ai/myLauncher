@@ -1,11 +1,32 @@
 # MyAlfred Launcher
 
 Application de bureau (macOS, Windows, Linux) qui installe, lance et met à jour les applications
-MyAlfred : **MIA**, **myBrief**, **myTrix** et **myBrain**, sur le poste de l'utilisateur ; les
+MyAlfred : **MIA** et **myBrief** (**myTrix** et **myBrain** bientôt), sur le poste de l'utilisateur ; les
 nouvelles versions sont détectées et s'appliquent en un clic. L'installation sur un serveur, pour
 toute une équipe, est proposée par MyAlfred.ai (page « Infos & contact » du launcher).
 
 ![Interface](docs/apercu.jpg)
+
+## Installer le launcher
+
+Télécharger le fichier de son ordinateur. Ces liens donnent toujours la dernière version publiée :
+
+| Ordinateur | Fichier à télécharger |
+|---|---|
+| **Mac** (Apple Silicon et Intel) | [MyAlfred-Launcher-macOS.dmg](https://github.com/MyAlfred-ai/myLauncher/releases/latest/download/MyAlfred-Launcher-macOS.dmg) |
+| **Windows** | [MyAlfred-Launcher-Windows.exe](https://github.com/MyAlfred-ai/myLauncher/releases/latest/download/MyAlfred-Launcher-Windows.exe) |
+| **Linux** | [AppImage](https://github.com/MyAlfred-ai/myLauncher/releases/latest/download/MyAlfred-Launcher-Linux.AppImage) ou [paquet .deb](https://github.com/MyAlfred-ai/myLauncher/releases/latest/download/MyAlfred-Launcher-Linux.deb) |
+
+- **Mac** : ouvrir le fichier téléchargé, glisser *MyAlfred Launcher* dans *Applications*, puis le
+  lancer. Tant que le launcher n'est pas signé par Apple, macOS refuse le premier lancement :
+  ouvrir *Réglages Système → Confidentialité et sécurité*, cliquer *Ouvrir quand même* en bas de
+  la page et confirmer. À ne faire qu'une fois.
+- **Windows** : double-cliquer le fichier téléchargé. Tant que le launcher n'est pas signé,
+  Windows affiche « Windows a protégé votre ordinateur » : cliquer *Informations
+  complémentaires*, puis *Exécuter quand même*.
+- **Linux** : installer le paquet .deb, ou rendre l'AppImage exécutable (`chmod +x`) et la lancer.
+
+Les versions suivantes s'installent ensuite depuis le launcher, en un clic.
 
 ## Ce que fait le launcher
 
@@ -32,7 +53,7 @@ toute une équipe, est proposée par MyAlfred.ai (page « Infos & contact » du 
 
 Chaque application MyAlfred est une application web auto-hébergée sous Docker. Le launcher ne
 réinvente pas leur installation : il écrit leur configuration (`.env`) puis appelle leurs propres
-scripts (`install.sh`, `./mytrix installer`…), comme le ferait un administrateur.
+scripts (`install.sh`, `kit/update.sh`…), comme le ferait un administrateur.
 
 ```
 Interface (Svelte 5)  ──invoke──▶  Cœur Rust (Tauri 2)
@@ -91,20 +112,27 @@ npm run check          # vérification des types
 cargo test --manifest-path src-tauri/Cargo.toml   # tests du cœur (dont exécution réelle sous bash 3.2)
 ```
 
-Tests en conditions réelles (lecture seule sur GitHub, clonage d'un dépôt privé, puis de MIA et
-myBrief, publiques, sans token, dans un dossier temporaire) :
+Tests en conditions réelles (lecture seule sur GitHub, clonage de MIA et myBrief sans token dans
+un dossier temporaire ; avec `ML_TEST_PRIVATE_REPO=propriétaire/dépôt`, clonage d'un dépôt privé
+avec le token) :
 
 ```bash
 GITHUB_TOKEN=$(gh auth token) ML_TEST_DIR=$(mktemp -d) cargo test --manifest-path src-tauri/Cargo.toml -- --ignored live_
 ```
 
+Avant tout push, tag ou release, voir [Publication](#publication).
+
 ## Publier une version
 
 1. Mettre à jour la version dans `package.json`, `src-tauri/Cargo.toml` et `src-tauri/tauri.conf.json`.
-2. Pousser un tag `vX.Y.Z` : le workflow **Release** construit les installeurs macOS (Apple Silicon
-   et Intel), Windows et Linux, les signe pour la mise à jour automatique et crée une release en
-   brouillon avec `latest.json`.
-3. Relire puis publier la release : les launchers installés la proposent.
+2. Pousser un tag `vX.Y.Z` : le workflow **Release** construit les installeurs macOS (un seul
+   paquet universel, Apple Silicon et Intel), Windows et Linux, les signe pour la mise à jour
+   automatique et crée une release en brouillon avec `latest.json`. Il y ajoute une copie des
+   installeurs sous un nom fixe (`MyAlfred-Launcher-macOS.dmg`, `-Windows.exe`,
+   `-Linux.AppImage`, `-Linux.deb`).
+3. Relire puis publier la release : les launchers installés la proposent, et les liens
+   `releases/latest/download/…` de la section [Installer le launcher](#installer-le-launcher)
+   servent aussitôt cette version.
 
 Secrets GitHub requis : `TAURI_SIGNING_PRIVATE_KEY` (et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` si la
 clé en a un). La clé privée de signature n'est **pas** dans le dépôt ; la clé publique est dans
@@ -125,26 +153,40 @@ clé en a un). La clé privée de signature n'est **pas** dans le dépôt ; la c
   seulement dans la configuration de l'application.
 - Désinstaller arrête et supprime les conteneurs mais garde volumes, `.env` et dossier.
 
-## Passage des dépôts en public
+## Applications publiées
 
-Rien à changer dans le code : sans token, le launcher lit les versions publiques et clone en
-HTTPS anonyme. La mise à jour du launcher fonctionne dès que les releases de ce dépôt sont publiques.
-
+Le launcher n'installe que des applications publiques, sans token, depuis leur dépôt public :
 MIA ([MyAlfred-ai/mia](https://github.com/MyAlfred-ai/mia)) et myBrief
-([MyAlfred-ai/my-brief](https://github.com/MyAlfred-ai/my-brief)) sont publiques : elles
-s'installent et se mettent à jour sans token. Tant que ce dépôt-ci reste privé, un launcher sans
-token ne lit pas le catalogue distant et garde celui qu'il embarque : publier une version du
-launcher pour que tous profitent du changement.
+([MyAlfred-ai/my-brief](https://github.com/MyAlfred-ai/my-brief)). Les autres applications du
+catalogue sont seulement annoncées (« Bientôt disponible », nom et accroche).
 
-- **MIA** : les installations faites depuis l'ancien dépôt privé `myLLM` basculent d'elles-mêmes
-  à la mise à jour suivante. Le dépôt public n'ayant pas de `backup.sh`, la sauvegarde d'avant
-  mise à jour (base MySQL et fichiers, dans `~/backups/<dossier>`, 3 conservées) est écrite dans
-  le catalogue.
+- **MIA** : avant chaque mise à jour, la base MySQL et les fichiers sont sauvegardés dans
+  `~/backups/<dossier>` (3 sauvegardes conservées).
 - **myBrief** : le launcher suit les versions publiées (releases `vX.Y.Z`, images signées
-  `ghcr.io/myalfred-ai/mybrief/*`) et s'appuie sur le kit du dépôt (`kit/`) : la mise à jour
-  passe par `kit/update.sh` (sauvegarde MongoDB et `.env` dans `kit/sauvegardes`, signature
-  vérifiée, retour arrière). Une ancienne installation locale faite depuis le dépôt privé
-  (dossier `install/`) n'est pas migrée : la désinstaller puis réinstaller.
+  `ghcr.io/myalfred-ai/mybrief/*`) et met à jour avec le kit du dépôt, `kit/update.sh`
+  (sauvegarde MongoDB et `.env` dans `kit/sauvegardes`, signature vérifiée, retour arrière).
+
+## Publication
+
+Ce dépôt est **public** : son contenu, tout son historique Git, ses releases, ses notes de
+version et les journaux GitHub Actions sont visibles de tous. Le catalogue de la branche `main`
+est lu par tous les launchers installés.
+
+Les règles sont dans [PUBLICATION.md](PUBLICATION.md) : rien d'autre que le launcher et les
+versions publiques de MIA et myBrief ; aucune donnée client, aucune information interne de
+MyAlfred.ai, aucun secret. Elles sont vérifiées automatiquement (CI sur chaque pull request et
+chaque push sur `main`, puis avant chaque build de release) ; à lancer aussi avant de pousser :
+
+```bash
+npm run verif:publication
+```
+
+## Licence
+
+[CC BY-NC-ND 4.0](LICENSE) : partage autorisé du launcher non modifié, avec mention de MyAlfred,
+sans usage commercial ni version modifiée. Toute personne ou organisation peut en outre
+l'installer et l'utiliser librement pour ses propres besoins. Les applications installées ont
+leur propre licence (MIA et myBrief : AGPL-3.0).
 
 ## Limites connues
 
@@ -152,4 +194,8 @@ launcher pour que tous profitent du changement.
   Windows (Git Bash) pour les exécuter, avec Docker Desktop. L'installation guidée de Docker et
   le Git intégré sont à valider sur un vrai poste Windows.
 - **myBrief en local** : expérimental (ports 80/443, certificat auto-signé sur `https://localhost`).
-- **macOS** : sans signature Apple, le premier lancement demande un clic droit → Ouvrir.
+- **macOS** : sans signature Apple, le premier lancement doit être autorisé dans *Réglages Système
+  → Confidentialité et sécurité → Ouvrir quand même* (depuis macOS 15, le clic droit → Ouvrir ne
+  suffit plus). Les secrets `APPLE_*` (Developer ID et notarisation) suppriment cette étape.
+- **Windows** : sans signature de code, SmartScreen avertit au premier lancement
+  (*Informations complémentaires → Exécuter quand même*).

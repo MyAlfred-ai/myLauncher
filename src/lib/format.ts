@@ -100,7 +100,7 @@ export function isStopped(s: RuntimeStatus | null | undefined): boolean {
   return s?.state === "stopped" || s?.state === "absent";
 }
 
-/** "localhost:8081", "brain.myalfred.ai": where the application answers. */
+/** "localhost:8081", "mia.entreprise.fr": where the application answers. */
 export function addressLabel(url: string): string {
   try {
     const u = new URL(url);

@@ -60,7 +60,7 @@ describe("form fields", () => {
 
   it("validates kinds", () => {
     expect(validateField(email, { MAIL: "nope" })).toBe("Adresse e-mail invalide");
-    expect(validateField(email, { MAIL: "a@b.fr" })).toBeNull();
+    expect(validateField(email, { MAIL: "a@entreprise.fr" })).toBeNull();
     expect(validateField(pwd, { PWD: "court" })).toBe("Au moins 8 caractères");
   });
 
@@ -76,7 +76,7 @@ describe("runtime", () => {
   const st = (state: "running" | "partial" | "stopped" | "absent" | "unknown") => ({ state, services: [], error: null });
   it("shows where the application answers", () => {
     expect(addressLabel("http://localhost:8081")).toBe("localhost:8081");
-    expect(addressLabel("https://brain.myalfred.ai/")).toBe("brain.myalfred.ai");
+    expect(addressLabel("https://mia.entreprise.fr/")).toBe("mia.entreprise.fr");
     expect(addressLabel("https://intra.fr/mia/")).toBe("intra.fr/mia");
     expect(addressLabel("pas une url")).toBe("pas une url");
   });

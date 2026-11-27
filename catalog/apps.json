@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-26",
+  "updated": "2026-11-27",
   "apps": [
     {
       "id": "mia",
@@ -148,19 +148,11 @@
       "name": "myTrix",
       "comingSoon": true,
       "tagline": "Le classement documentaire intelligent",
-      "description": "Réorganise et maintient vos arborescences de fichiers (dossiers locaux, Google Drive, OneDrive) selon des règles claires, avec l'aide de l'IA.",
+      "description": "",
       "icon": "mytrix.png",
       "color": "#ec0c7e",
-      "features": [
-        "Inventaire et classement assistés",
-        "Dossiers locaux, Google Drive et OneDrive",
-        "Agent local en lecture seule par défaut",
-        "Sauvegardes chiffrées et vérifiées"
-      ],
       "repo": { "owner": "MyAlfred-ai", "name": "mytrix", "branch": "main" },
       "version": { "source": "commit" },
-      "changelog": { "source": "file", "path": "CHANGELOG.md" },
-      "requirements": ["Docker", "Client OAuth Google", "Chrome ou Firefox"],
       "dotenvQuote": "single",
       "targets": {
         "local": {
@@ -196,19 +188,11 @@
       "name": "myBrain",
       "comingSoon": true,
       "tagline": "Le cerveau partagé de votre équipe",
-      "description": "Un wiki d'équipe en Markdown, tenu à jour tout seul à partir de vos mails, documents et pages web, interrogeable en langage naturel. Chaque fait garde sa source.",
+      "description": "",
       "icon": "mybrain.png",
       "color": "#5e55d1",
-      "features": [
-        "Ingestion des mails, documents Drive et pages web",
-        "Faits datés et sourcés, rangés dans les bonnes fiches",
-        "Réponses en langage naturel, avec citations",
-        "Accès par personne via Google"
-      ],
       "repo": { "owner": "MyAlfred-ai", "name": "mybrain", "branch": "main" },
       "version": { "source": "commit" },
-      "changelog": { "source": "commits" },
-      "requirements": ["Docker", "Google Workspace", "4 Go de mémoire pour la construction"],
       "dotenvQuote": "none",
       "targets": {
         "local": {

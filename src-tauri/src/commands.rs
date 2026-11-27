@@ -125,6 +125,10 @@ pub async fn get_changelog(app: AppHandle, app_id: String) -> Result<String> {
         let def = find_app(&st.catalog.read().unwrap().catalog, &app_id)?;
         (def, st.gh())
     };
+    // Unreleased: its news stay private until it is published.
+    if def.coming_soon {
+        bail!("{} sera bientôt disponible.", def.name);
+    }
     gh.changelog(&def).await
 }
 

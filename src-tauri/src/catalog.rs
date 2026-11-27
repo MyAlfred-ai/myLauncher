@@ -379,6 +379,18 @@ mod tests {
                 "{id}: Google/Microsoft"
             );
         }
+        // Not released yet: name and tagline only, nothing else is shown (PUBLICATION.md).
+        for app in c.apps.iter().filter(|a| a.coming_soon) {
+            assert!(
+                app.description.is_empty()
+                    && app.features.is_empty()
+                    && app.requirements.is_empty()
+                    && app.services.is_empty()
+                    && app.changelog.is_none(),
+                "{}: pas de présentation avant la sortie",
+                app.id
+            );
+        }
         for app in &c.apps {
             let local = app.targets.local.as_ref().expect("local target");
             assert!(

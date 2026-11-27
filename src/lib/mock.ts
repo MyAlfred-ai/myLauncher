@@ -33,7 +33,7 @@ let installations: Installation[] = [
     id: "inst-mia",
     appId: "mia",
     dir: "/Users/demo/MyAlfred/mia",
-    values: { MIA_PORT: "8080", MIA_ADMIN_EMAIL: "axel@myalfred.ai" },
+    values: { MIA_PORT: "8080", MIA_ADMIN_EMAIL: "vous@entreprise.fr" },
     version: "1.5.0.2",
     commit: "a1b2c3d",
     url: "http://localhost:8080",
@@ -45,13 +45,13 @@ let installations: Installation[] = [
     busyOp: null,
   },
   {
-    id: "inst-brain",
-    appId: "mybrain",
-    dir: "/Users/demo/MyAlfred/mybrain",
+    id: "inst-brief",
+    appId: "mybrief",
+    dir: "/Users/demo/MyAlfred/mybrief",
     values: {},
-    version: "9f8e7d6",
-    commit: "9f8e7d6c",
-    url: "http://localhost:5173",
+    version: "1.3.0.90",
+    commit: "2c68389",
+    url: "https://localhost",
     state: "ready",
     installedAt: ago(500),
     updatedAt: ago(20),
@@ -61,7 +61,7 @@ let installations: Installation[] = [
   },
 ];
 // Containers' state of the demo installations, changed by start/stop.
-const running: Record<string, boolean> = { "inst-mia": true, "inst-brain": false };
+const running: Record<string, boolean> = { "inst-mia": true, "inst-brief": false };
 const ops: OpInfo[] = [];
 const logs = new Map<string, LogLine[]>();
 let seq = 0;
@@ -71,8 +71,6 @@ let launcherUpdate: Overview["launcherUpdate"] = { version: "0.2.0", error: null
 const latest = () => ({
   mia: { latest: { version: "1.5.0.4", refKind: "branch", refName: "main", commit: "f00ba44", date: ago(5), summary: "feat: recherche web Mistral" }, error: null, checkedAt: ago(0.2) },
   mybrief: { latest: { version: "1.3.0.90", refKind: "branch", refName: "main", commit: "2c68389", date: ago(30), summary: "fix: export PDF" }, error: null, checkedAt: ago(0.2) },
-  mytrix: { latest: { version: "4d5e6f7", refKind: "branch", refName: "main", commit: "4d5e6f7a", date: ago(50), summary: "feat: agent en écriture" }, error: null, checkedAt: ago(0.2) },
-  mybrain: { latest: { version: "9f8e7d6", refKind: "branch", refName: "main", commit: "9f8e7d6c", date: ago(20), summary: "feat: tableaux de bord" }, error: null, checkedAt: ago(0.2) },
 });
 
 function overview(): Overview {
@@ -211,10 +209,10 @@ export async function mockInvoke<T>(cmd: string, args: Record<string, unknown> =
       settings = a.settings;
       return settings as T;
     case "github_status":
-      return { present: hasToken, login: hasToken ? "axel-myalfred" : null, error: null } as T;
+      return { present: hasToken, login: hasToken ? "demo" : null, error: null } as T;
     case "set_github_token":
       hasToken = true;
-      return { present: true, login: "axel-myalfred", error: null } as T;
+      return { present: true, login: "demo", error: null } as T;
     case "clear_github_token":
       hasToken = false;
       return undefined as T;

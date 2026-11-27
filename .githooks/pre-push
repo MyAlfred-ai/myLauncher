@@ -1,0 +1,21 @@
+#!/bin/sh
+# Ce dépôt est public : avant chaque push, vérifie les règles de PUBLICATION.md sur les fichiers
+# et sur les lignes ajoutées par les commits envoyés. Activé par `npm install` (script prepare).
+# Liste privée de mots interdits : variable MOTS_INTERDITS (un mot par ligne).
+zero=0000000000000000000000000000000000000000
+command -v node >/dev/null 2>&1 || { echo "pre-push : node introuvable, vérification de publication impossible." >&2; exit 1; }
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # suppression d'une branche distante
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    base=$remote_sha
+  else
+    base=$(git merge-base "$local_sha" origin/main 2>/dev/null) || base=""
+  fi
+  if [ -n "$base" ]; then
+    node scripts/verif-publication.mjs --hors-ligne --depuis "$base" --jusqua "$local_sha" || exit 1
+  else
+    node scripts/verif-publication.mjs --hors-ligne || exit 1
+  fi
+done
+exit 0

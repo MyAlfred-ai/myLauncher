@@ -1,5 +1,21 @@
 # Changelog
 
+## [Non publié]
+
+### Ajouté
+- Liens de téléchargement fixes, toujours vers la dernière version publiée
+  (`releases/latest/download/MyAlfred-Launcher-macOS.dmg`, `-Windows.exe`, `-Linux.AppImage`,
+  `-Linux.deb`) et guide d'installation pas à pas en tête du README.
+- Liens de téléchargement en tête de chaque release.
+- Licence CC BY-NC-ND 4.0, avec autorisation d'installer et d'utiliser librement le launcher.
+- Règles de publication du dépôt public (PUBLICATION.md), vérifiées automatiquement avant chaque
+  push, en CI et avant chaque release.
+
+### Modifié
+- Un seul installeur Mac, universel (Apple Silicon et Intel), au lieu de deux.
+- myTrix et myBrain (« Bientôt disponible ») : seuls le nom et l'accroche sont affichés, sans
+  présentation, prérequis, nouveautés ni dépôt source.
+
 ## [0.1.5] - 2026-11-27
 
 ### Modifié

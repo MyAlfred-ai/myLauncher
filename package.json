@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.5",
   "description": "Installe, lance et met à jour les applications MyAlfred.",
+  "license": "CC-BY-NC-ND-4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +11,9 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "verif:publication": "node scripts/verif-publication.mjs",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@fontsource-variable/lexend": "^5.2.0",
