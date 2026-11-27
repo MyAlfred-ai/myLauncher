@@ -1,6 +1,6 @@
 # Changelog
 
-## [Non publié]
+## [0.1.6] - 2026-11-27
 
 ### Ajouté
 - Liens de téléchargement fixes, toujours vers la dernière version publiée
