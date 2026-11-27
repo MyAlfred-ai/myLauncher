@@ -38,6 +38,7 @@ pub struct Overview {
     pub ops: Vec<OpInfo>,
     pub settings: Settings,
     pub has_token: bool,
+    pub token_rejected: bool,
     pub last_check: Option<String>,
     pub launcher_update: LauncherUpdateState,
     pub platform: String,
@@ -90,6 +91,7 @@ pub fn get_overview(app: AppHandle) -> Overview {
         ops: st.ops.list(),
         settings,
         has_token: st.token().is_some(),
+        token_rejected: st.token_rejected(),
         last_check,
         launcher_update,
         platform: std::env::consts::OS.into(),
@@ -118,12 +120,12 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<()> {
 
 #[tauri::command]
 pub async fn get_changelog(app: AppHandle, app_id: String) -> Result<String> {
-    let (def, token) = {
+    let (def, gh) = {
         let st = state(&app);
         let def = find_app(&st.catalog.read().unwrap().catalog, &app_id)?;
-        (def, st.token())
+        (def, st.gh())
     };
-    Gh::new(token).changelog(&def).await
+    gh.changelog(&def).await
 }
 
 #[tauri::command]
@@ -164,7 +166,17 @@ pub async fn github_status(app: AppHandle) -> TokenStatus {
             error: None,
         };
     };
-    match Gh::new(Some(token)).whoami().await {
+    let gh = Gh::new(Some(token));
+    let result = gh.whoami().await;
+    // A refusal or a success says whether the token works; a network error doesn't.
+    if gh.token_rejected() || result.is_ok() {
+        let st = state(&app);
+        if st.token_rejected() != gh.token_rejected() {
+            st.set_token_rejected(gh.token_rejected());
+            let _ = app.emit("overview-changed", ());
+        }
+    }
+    match result {
         Ok(login) => TokenStatus {
             present: true,
             login: Some(login),
@@ -187,6 +199,7 @@ pub async fn set_github_token(app: AppHandle, token: String) -> Result<TokenStat
     let login = Gh::new(Some(token.clone())).whoami().await?;
     secrets::set_token(&token)?;
     *state(&app).token.write().unwrap() = Some(token);
+    state(&app).set_token_rejected(false);
     let _ = app.emit("overview-changed", ());
     Ok(TokenStatus {
         present: true,
@@ -199,6 +212,7 @@ pub async fn set_github_token(app: AppHandle, token: String) -> Result<TokenStat
 pub fn clear_github_token(app: AppHandle) -> Result<()> {
     secrets::clear_token()?;
     *state(&app).token.write().unwrap() = None;
+    state(&app).set_token_rejected(false);
     let _ = app.emit("overview-changed", ());
     Ok(())
 }

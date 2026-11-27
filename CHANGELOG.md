@@ -1,5 +1,13 @@
 # Changelog
 
+## [Non publié]
+
+### Modifié
+- Token GitHub expiré ou révoqué : le launcher continue sans lui (MIA et myBrief se vérifient,
+  s'installent et se mettent à jour normalement) au lieu d'échouer partout, et ne le renvoie plus.
+  Un bandeau « Token GitHub refusé » mène aux réglages pour le remplacer ; les messages d'erreur
+  (dépôt privé, téléchargement du code, limite de requêtes) disent aussi de le remplacer.
+
 ## [0.1.4] - 2026-11-09
 
 ### Ajouté

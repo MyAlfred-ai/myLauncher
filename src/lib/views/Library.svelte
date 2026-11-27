@@ -38,7 +38,16 @@
     </div>
   {/if}
 
-  {#if accessErrors && !o.hasToken}
+  {#if o.tokenRejected}
+    <div class="callout warning">
+      <Icon name="key" size={18} />
+      <div>
+        <strong>Token GitHub refusé.</strong> Le token enregistré a expiré ou a été révoqué : le launcher continue
+        sans lui pour les applications publiques.
+        <button class="link" onclick={() => launcher.go({ name: "settings" })}>Remplacer le token</button>
+      </div>
+    </div>
+  {:else if accessErrors && !o.hasToken}
     <div class="callout warning">
       <Icon name="key" size={18} />
       <div>

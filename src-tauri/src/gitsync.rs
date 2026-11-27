@@ -32,9 +32,13 @@ pub fn head_commit(dir: &Path) -> Option<String> {
     Some(commit.id().to_string())
 }
 
-fn readable(e: git2::Error) -> Error {
+fn readable(e: git2::Error, has_token: bool) -> Error {
     if e.code() == ErrorCode::Auth || e.message().contains("401") {
-        Error::msg("Téléchargement refusé. Dépôt privé ? Ajoutez un token GitHub dans les réglages du launcher.")
+        if has_token {
+            Error::msg("Téléchargement refusé : le token GitHub a expiré, a été révoqué ou n'a pas accès à ce dépôt. Remplacez-le dans les réglages du launcher.")
+        } else {
+            Error::msg("Téléchargement refusé. Dépôt privé ? Ajoutez un token GitHub dans les réglages du launcher.")
+        }
     } else if e.code() == ErrorCode::User {
         Error::msg("Opération annulée.")
     } else if matches!(
@@ -127,7 +131,7 @@ pub fn sync(
         fo.download_tags(AutotagOption::None);
         remote
             .fetch(&[&refspec], Some(&mut fo), None)
-            .map_err(readable)?;
+            .map_err(|e| readable(e, src.token.is_some()))?;
     }
     if cancel.load(Ordering::Relaxed) {
         bail!("Opération annulée.");
@@ -295,6 +299,13 @@ mod tests {
         .unwrap();
         assert_eq!(got, c1.to_string());
         assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "1");
+    }
+
+    #[test]
+    fn refused_download_with_token_blames_the_token() {
+        let e = git2::Error::new(ErrorCode::Auth, ErrorClass::Http, "401 accès refusé");
+        let msg = readable(e, true).to_string();
+        assert!(msg.contains("expiré") && msg.contains("réglages"), "{msg}");
     }
 
     #[test]

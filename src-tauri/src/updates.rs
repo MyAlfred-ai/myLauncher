@@ -8,7 +8,6 @@ use tauri_plugin_updater::UpdaterExt;
 
 use crate::catalog::{Catalog, VersionSource};
 use crate::error::{bail, Error, Result};
-use crate::github::Gh;
 use crate::ops::OpInfo;
 use crate::script::Action;
 use crate::state::{now, state, LatestState};
@@ -22,8 +21,7 @@ pub async fn refresh_catalog(app: &AppHandle) -> Result<()> {
     if url.trim().is_empty() {
         return Ok(());
     }
-    let gh = Gh::new(st.token());
-    let text = gh.fetch_text(&url).await?;
+    let text = st.gh().fetch_text(&url).await?;
     let remote = Catalog::parse(&text)?;
     let mut cur = st.catalog.write().unwrap();
     if remote.updated >= cur.catalog.updated {
@@ -42,14 +40,12 @@ pub async fn check_all(app: &AppHandle) {
         log::info!("catalogue distant indisponible : {e}");
     }
     let apps = st.catalog.read().unwrap().catalog.apps.clone();
-    let token = st.token();
 
     let mut set = tokio::task::JoinSet::new();
     // "Coming soon" apps live in private repositories: asking GitHub would only fail.
     for a in apps.into_iter().filter(|a| !a.coming_soon) {
-        let token = token.clone();
+        let gh = st.gh();
         set.spawn(async move {
-            let gh = Gh::new(token);
             let r = gh.latest(&a).await;
             (a.id.clone(), r)
         });

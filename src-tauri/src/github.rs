@@ -1,6 +1,8 @@
 //! Reads versions, changelogs and the catalog from GitHub. Works without a
 //! token for public repositories; private ones need a token (repo read).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::{header, Client, StatusCode};
@@ -29,7 +31,13 @@ pub struct Latest {
 
 pub struct Gh {
     client: Client,
+    /// API base; the token goes to GitHub hosts and to this origin only.
+    api: String,
     token: Option<String>,
+    /// Set once GitHub refused the token (expired or revoked): later
+    /// requests go out without it, so public repositories keep working.
+    /// Shared with the app state, so it outlives this client.
+    rejected: Arc<AtomicBool>,
 }
 
 #[derive(Deserialize)]
@@ -114,12 +122,35 @@ pub fn is_github_host(url: &str) -> bool {
         })
 }
 
+fn same_origin(a: &str, b: &str) -> bool {
+    match (reqwest::Url::parse(a), reqwest::Url::parse(b)) {
+        (Ok(a), Ok(b)) => a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
 impl Gh {
     pub fn new(token: Option<String>) -> Self {
+        Self::shared(token, Arc::default())
+    }
+
+    /// Client whose "token refused" flag is shared (with the app state).
+    pub fn shared(token: Option<String>, rejected: Arc<AtomicBool>) -> Self {
         Gh {
             client: http_client(),
+            api: API.into(),
             token: token.filter(|t| !t.trim().is_empty()),
+            rejected,
         }
+    }
+
+    /// GitHub refused the token: it has expired or been revoked.
+    pub fn token_rejected(&self) -> bool {
+        self.rejected.load(Ordering::Relaxed)
+    }
+
+    fn may_send_token(&self, url: &str) -> bool {
+        is_github_host(url) || same_origin(url, &self.api)
     }
 
     fn get(&self, url: &str, accept: &str) -> reqwest::RequestBuilder {
@@ -128,26 +159,47 @@ impl Gh {
             .get(url)
             .header(header::ACCEPT, accept)
             .header("X-GitHub-Api-Version", "2022-11-28");
-        if let Some(t) = &self.token {
-            if is_github_host(url) {
-                req = req.bearer_auth(t);
-            }
+        if let Some(t) = self.auth(url) {
+            req = req.bearer_auth(t);
         }
         req
     }
 
-    async fn send(&self, url: &str, accept: &str, what: &str) -> Result<reqwest::Response> {
-        let resp = self.get(url, accept).send().await.map_err(|e| {
+    /// Token to send with a request to `url`, unless GitHub refused it.
+    fn auth(&self, url: &str) -> Option<&str> {
+        self.token
+            .as_deref()
+            .filter(|_| !self.token_rejected() && self.may_send_token(url))
+    }
+
+    async fn request(&self, url: &str, accept: &str) -> Result<reqwest::Response> {
+        self.get(url, accept).send().await.map_err(|e| {
             if e.is_timeout() || e.is_connect() {
                 Error::msg("GitHub est injoignable : vérifiez la connexion Internet.")
             } else {
                 Error::Http(e)
             }
-        })?;
+        })
+    }
+
+    async fn send(&self, url: &str, accept: &str, what: &str) -> Result<reqwest::Response> {
+        let authed = self.auth(url).is_some();
+        let mut resp = self.request(url, accept).await?;
+        if authed && resp.status() == StatusCode::UNAUTHORIZED {
+            // Expired or revoked token: public repositories stay readable
+            // without it, and it is not sent again.
+            self.rejected.store(true, Ordering::Relaxed);
+            log::warn!("token GitHub refusé : les requêtes continuent sans token");
+            resp = self.request(url, accept).await?;
+        }
         match resp.status() {
             s if s.is_success() => Ok(resp),
             StatusCode::NOT_FOUND => {
-                if self.token.is_some() {
+                if self.token_rejected() {
+                    bail!(
+                        "{what} introuvable ou privé : le token GitHub a été refusé (expiré ou révoqué), remplacez-le dans les réglages."
+                    )
+                } else if self.token.is_some() {
                     bail!("{what} introuvable, ou le token GitHub n'y a pas accès.")
                 } else {
                     bail!(
@@ -163,6 +215,9 @@ impl Gh {
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
                 if remaining == "0" {
+                    if self.token_rejected() {
+                        bail!("Limite de requêtes GitHub atteinte : le token GitHub a été refusé (expiré ou révoqué), remplacez-le dans les réglages.")
+                    }
                     bail!("Limite de requêtes GitHub atteinte : réessayez plus tard ou ajoutez un token.")
                 }
                 bail!("Accès refusé par GitHub à {what}.")
@@ -172,7 +227,7 @@ impl Gh {
     }
 
     async fn json<T: for<'de> Deserialize<'de>>(&self, path: &str, what: &str) -> Result<T> {
-        let url = format!("{API}{path}");
+        let url = format!("{}{path}", self.api);
         Ok(self
             .send(&url, "application/vnd.github+json", what)
             .await?
@@ -182,7 +237,10 @@ impl Gh {
 
     /// Raw content of a file on a branch.
     pub async fn file(&self, owner: &str, repo: &str, path: &str, git_ref: &str) -> Result<String> {
-        let url = format!("{API}/repos/{owner}/{repo}/contents/{path}?ref={git_ref}");
+        let url = format!(
+            "{}/repos/{owner}/{repo}/contents/{path}?ref={git_ref}",
+            self.api
+        );
         let resp = self
             .send(
                 &url,
@@ -195,7 +253,7 @@ impl Gh {
 
     /// Any URL (catalog); the token is attached only for GitHub hosts.
     pub async fn fetch_text(&self, url: &str) -> Result<String> {
-        let accept = if url.starts_with(API) {
+        let accept = if same_origin(url, &self.api) {
             "application/vnd.github.raw"
         } else {
             "application/json"
@@ -404,6 +462,124 @@ mod tests {
         let s = "é".repeat(10);
         let t = truncate(&s, 5);
         assert!(t.starts_with("éé"));
+    }
+
+    #[test]
+    fn token_not_sent_to_lookalike_of_api_base() {
+        let gh = Gh::new(Some("t".into()));
+        assert!(gh.may_send_token("https://api.github.com/repos/x/y"));
+        assert!(!gh.may_send_token("https://api.github.com.evil.io/x"));
+    }
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::AtomicUsize;
+
+    /// Local stand-in for the GitHub API: `reply(authed)` gives the status
+    /// and body. Returns its base URL and the number of requests that
+    /// carried a token.
+    fn fake_github(reply: fn(bool) -> (u16, &'static str)) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let authed_count = Arc::new(AtomicUsize::new(0));
+        let count = authed_count.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut head = Vec::new();
+                let mut chunk = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let authed = String::from_utf8_lossy(&head)
+                    .to_ascii_lowercase()
+                    .contains("\r\nauthorization:");
+                if authed {
+                    count.fetch_add(1, Ordering::SeqCst);
+                }
+                let (status, body) = reply(authed);
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 {status} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (base, authed_count)
+    }
+
+    fn gh_at(base: &str, token: &str, rejected: Arc<AtomicBool>) -> Gh {
+        Gh {
+            client: Client::builder().no_proxy().build().unwrap(),
+            api: base.to_string(),
+            token: Some(token.into()),
+            rejected,
+        }
+    }
+
+    fn refuses_token(authed: bool) -> (u16, &'static str) {
+        if authed {
+            (401, r#"{"message":"Bad credentials"}"#)
+        } else {
+            (200, "1.2.3")
+        }
+    }
+
+    #[tokio::test]
+    async fn refused_token_falls_back_to_anonymous() {
+        let (base, _) = fake_github(refuses_token);
+        let gh = gh_at(&base, "expired", Arc::default());
+        let v = gh.file("o", "r", "VERSION", "main").await.unwrap();
+        assert_eq!(v, "1.2.3");
+        assert!(gh.token_rejected());
+    }
+
+    #[tokio::test]
+    async fn refused_token_is_not_sent_again() {
+        let (base, authed) = fake_github(refuses_token);
+        // Each check builds its own client; the flag lives in the app state.
+        let flag = Arc::new(AtomicBool::new(false));
+        for _ in 0..3 {
+            gh_at(&base, "expired", flag.clone())
+                .file("o", "r", "VERSION", "main")
+                .await
+                .unwrap();
+        }
+        assert_eq!(authed.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn private_repo_with_refused_token_points_to_settings() {
+        let (base, _) = fake_github(|authed| if authed { (401, "") } else { (404, "") });
+        let err = gh_at(&base, "expired", Arc::default())
+            .file("o", "r", "VERSION", "main")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("refusé") && err.contains("réglages"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn whoami_flags_refused_token() {
+        let (base, _) = fake_github(|_| (401, r#"{"message":"Bad credentials"}"#));
+        let gh = gh_at(&base, "expired", Arc::default());
+        let err = gh.whoami().await.unwrap_err().to_string();
+        assert!(err.contains("Token GitHub refusé"), "{err}");
+        assert!(gh.token_rejected());
+    }
+
+    #[tokio::test]
+    async fn valid_token_is_kept() {
+        let (base, authed) = fake_github(|authed| if authed { (200, "1.2.3") } else { (404, "") });
+        let gh = gh_at(&base, "good", Arc::default());
+        for _ in 0..2 {
+            assert_eq!(gh.file("o", "r", "VERSION", "main").await.unwrap(), "1.2.3");
+        }
+        assert!(!gh.token_rejected());
+        assert_eq!(authed.load(Ordering::SeqCst), 2);
     }
 }
 

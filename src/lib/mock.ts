@@ -88,6 +88,7 @@ function overview(): Overview {
     ops: [...ops].sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
     settings,
     hasToken,
+    tokenRejected: false,
     lastCheck: ago(0.2),
     launcherUpdate,
     platform: "macos",

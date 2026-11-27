@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::catalog::{Catalog, EMBEDDED};
 use crate::error::Result;
-use crate::github::Latest;
+use crate::github::{Gh, Latest};
 use crate::ops::OpManager;
 use crate::secrets;
 use crate::store::{load_json, save_json, InstallState, Settings, Store};
@@ -47,6 +48,9 @@ pub struct AppState {
     pub last_check: RwLock<Option<String>>,
     pub launcher_update: RwLock<LauncherUpdateState>,
     pub token: RwLock<Option<String>>,
+    /// GitHub refused the saved token (expired or revoked): requests go out
+    /// without it until it is replaced.
+    pub token_rejected: Arc<AtomicBool>,
     pub ops: OpManager,
 }
 
@@ -90,6 +94,7 @@ impl AppState {
             last_check: RwLock::new(None),
             launcher_update: RwLock::new(LauncherUpdateState::default()),
             token: RwLock::new(secrets::get_token()),
+            token_rejected: Arc::default(),
             ops: OpManager::default(),
         })
     }
@@ -110,6 +115,19 @@ impl AppState {
 
     pub fn token(&self) -> Option<String> {
         self.token.read().unwrap().clone()
+    }
+
+    pub fn token_rejected(&self) -> bool {
+        self.token_rejected.load(Ordering::Relaxed)
+    }
+
+    pub fn set_token_rejected(&self, rejected: bool) {
+        self.token_rejected.store(rejected, Ordering::Relaxed);
+    }
+
+    /// GitHub client that skips the token once GitHub has refused it.
+    pub fn gh(&self) -> Gh {
+        Gh::shared(self.token(), self.token_rejected.clone())
     }
 }
 

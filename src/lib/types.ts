@@ -150,6 +150,8 @@ export interface Overview {
   ops: OpInfo[];
   settings: Settings;
   hasToken: boolean;
+  /** GitHub refused the saved token (expired or revoked). */
+  tokenRejected: boolean;
   lastCheck: string | null;
   launcherUpdate: LauncherUpdate;
   platform: string;
