@@ -76,14 +76,22 @@ pub fn desktop_apps() -> Vec<(&'static str, PathBuf)> {
     found
 }
 
+/// Runs `cmd` for its exit code only, within `limit`.
+async fn succeeds(cmd: &mut Command, limit: Duration) -> bool {
+    // status() closes piped handles as soon as the child starts: a command
+    // that writes (docker info does) would die of SIGPIPE and look failed.
+    quiet(cmd).stdout(Stdio::null()).stderr(Stdio::null());
+    matches!(
+        tokio::time::timeout(limit, cmd.status()).await,
+        Ok(Ok(s)) if s.success()
+    )
+}
+
 /// True when `docker info` answers, i.e. the engine is running.
 pub async fn daemon_ok() -> bool {
     let mut cmd = Command::new("docker");
-    quiet(&mut cmd).arg("info");
-    matches!(
-        tokio::time::timeout(Duration::from_secs(15), cmd.status()).await,
-        Ok(Ok(s)) if s.success()
-    )
+    cmd.arg("info");
+    succeeds(&mut cmd, Duration::from_secs(15)).await
 }
 
 fn launch(app: &Path) -> Result<()> {
@@ -398,6 +406,20 @@ pub async fn start() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn succeeds_reads_the_exit_code_of_a_command_that_writes() {
+        // Regression: with piped output, `docker info` died of SIGPIPE and a
+        // running Docker was reported as stopped.
+        let mut talks = Command::new("sh");
+        talks.args(["-c", "echo bonjour; echo erreur >&2"]);
+        assert!(succeeds(&mut talks, Duration::from_secs(10)).await);
+
+        let mut fails = Command::new("sh");
+        fails.args(["-c", "echo bonjour; exit 3"]);
+        assert!(!succeeds(&mut fails, Duration::from_secs(10)).await);
+    }
 
     #[test]
     fn escapes_for_applescript_and_powershell() {
